@@ -1,0 +1,4 @@
+target
+.dockerignore
+Fetcher.Dockerfile
+Processor.Dockerfile

@@ -1,0 +1,15 @@
+[package]
+name = "shared"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+serde.workspace = true
+chrono.workspace = true
+figment.workspace = true
+anyhow.workspace = true
+rsmq_async.workspace = true
+
+[dev-dependencies]
+reqwest.workspace = true
+tokio.workspace = true

@@ -1,0 +1,54 @@
+services:
+  redis:
+    image: redis:7.4.2
+    restart: always
+    volumes:
+      - redis:/data
+    healthcheck:
+      test: "[ $$(redis-cli ping) = 'PONG' ]"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: postgres:17.4
+    restart: always
+    volumes:
+      - pg:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: passport
+      POSTGRES_PASSWORD: passport
+      POSTGRES_DB: passport
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U passport" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  datafeed_fetcher:
+    build:
+      context: .
+      dockerfile: Fetcher.Dockerfile
+    restart: always
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      RUST_LOG: datafeed_fetcher=debug
+
+  datafeed_processor:
+    build:
+      context: .
+      dockerfile: Processor.Dockerfile
+    restart: always
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      RUST_LOG: datafeed_processor=debug,sqlx=debug
+
+volumes:
+  redis:
+  pg:
