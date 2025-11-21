@@ -5,8 +5,8 @@ use figment::providers::{Env, Format, Toml};
 use rsmq_async::RsmqOptions;
 use serde::Deserialize;
 
-pub const DATAFEED_QUEUE_NAME: &str = "vnas_datafeed";
-pub const ENV_VAR_PREFIX: &str = "ZOAPASSPORT_";
+pub const DATAFEED_QUEUE_NAME: &str = "vnas_stats";
+pub const ENV_VAR_PREFIX: &str = "VNAS_STATS_";
 pub const SETTINGS_FILE: &str = "Settings.toml";
 
 #[derive(Debug, Deserialize)]
@@ -38,12 +38,8 @@ pub fn load_config() -> anyhow::Result<Config> {
         .extract::<Config>()?)
 }
 
-pub trait RedisConfigLoader {
-    fn from_config(config: &RedisConfig) -> Self;
-}
-
-impl RedisConfigLoader for RsmqOptions {
-    fn from_config(config: &RedisConfig) -> Self {
+impl From<&RedisConfig> for RsmqOptions {
+    fn from(config: &RedisConfig) -> Self {
         Self {
             host: config.host.clone(),
             port: config.port,

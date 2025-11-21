@@ -1,8 +1,10 @@
+use chrono::{DateTime, Utc};
 use rsmq_async::{Rsmq, RsmqConnection, RsmqError, RsmqOptions};
-use shared::vnas::datafeed::{DatafeedRoot, VnasEnvironment, datafeed_url};
-use shared::{RedisConfigLoader, load_config};
-use std::cmp::min;
+use serde_json::Value;
+use shared::vnas::datafeed::{VnasEnvironment, datafeed_url};
+use shared::{load_config, vnas};
 use std::time::{Duration, Instant};
+use thiserror::Error;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::EnvFilter;
@@ -27,7 +29,7 @@ async fn main() -> Result<(), anyhow::Error> {
     })?;
 
     // Set up Redis Queue based on configuration
-    let connection_options = RsmqOptions::from_config(&config.redis);
+    let connection_options = RsmqOptions::from(&config.redis);
 
     let mut rsmq = initialize_rsmq(connection_options, config.redis.force_recreate)
         .await
@@ -36,67 +38,52 @@ async fn main() -> Result<(), anyhow::Error> {
             panic!("RSMQ could not be initialized")
         })?;
 
-    let mut last_datafeed_update = None;
-    info!("Initialized Datafeed Fetcher");
+    // Default reqwest client
+    let http_client = reqwest::Client::new();
 
     // Datafetcher infinite loop
+    info!("Initialized Datafeed Fetcher");
+    let mut initial_loop = true;
+    let mut previous_timestamp: Option<DateTime<Utc>> = None;
     loop {
-        let start = Instant::now();
-
-        let latest_data_result = fetch_datafeed().await;
-        if let Err(e) = latest_data_result {
-            warn!(error = ?e, "Could not fetch or deserialize vNAS datafeed");
-            sleep(Duration::from_secs(1)).await;
-            continue;
-        };
-
-        // Unwrap and check if duplicate from last fetch
-        // Safe to unwrap because checked Err case above already
-        let latest_data = latest_data_result.expect("Could not fetch or deserialize vNAS datafeed");
-        if let Some(last_datafeed_time) = last_datafeed_update {
-            if last_datafeed_time == latest_data.updated_at {
-                debug!(time = %latest_data.updated_at, "Found duplicate");
-                sleep(Duration::from_secs(15)).await;
-                continue;
-            }
+        if initial_loop {
+            initial_loop = false;
+        } else {
+            sleep(Duration::from_secs(15)).await;
         }
 
-        // Update timestamp of latest data and process datafeed
-        debug!(time = %latest_data.updated_at, "Found new datafeed");
-        last_datafeed_update = Some(latest_data.updated_at);
+        let (bytes, current_timestamp) =
+            match fetch_datafeed_bytes_and_timestamp(&http_client).await {
+                Ok((b, t)) => (b, t),
+                Err(e) => {
+                    warn!(error = ?e, "Failed to fetch and deserialize datafeed");
+                    continue;
+                }
+            };
 
-        // Send message to Redis with Controllers JSON
+        // If we found a duplicate, continue the loop which will sleep at the top
+        if let Some(previous_timestamp) = previous_timestamp
+            && previous_timestamp == current_timestamp
+        {
+            info!(
+                timestamp = ?previous_timestamp,
+                "Found no change to datafeed"
+            );
+            continue;
+        }
+
+        info!(timestamp = ?current_timestamp, "Found updated datafeed");
+        previous_timestamp = Some(current_timestamp);
         let sent = rsmq
-            .send_message::<Vec<u8>>(
-                shared::DATAFEED_QUEUE_NAME,
-                serde_json::to_string(&latest_data)?.into_bytes(),
-                None,
-            )
+            .send_message::<Vec<u8>>(shared::DATAFEED_QUEUE_NAME, bytes, None)
             .await;
         if let Err(e) = sent {
             warn!(error = ?e, "Could not send message to Redis");
-            // No continue here because at this point we want to sleep for 5 seconds
+            continue;
         } else {
             debug!("Sent message to Redis");
         }
-
-        // Sleep for 15 seconds minus the time this loop took, with some protections to make sure we
-        // don't have a negative duration
-        let loop_time = Instant::now() - start;
-        if loop_time > Duration::from_secs(14) {
-            warn!(?loop_time, "Long loop");
-        }
-        let sleep_duration = Duration::from_secs(15) - min(Duration::from_secs(14), loop_time);
-        debug!(?sleep_duration, "Sleeping");
-        sleep(sleep_duration).await;
     }
-}
-
-async fn fetch_datafeed() -> Result<DatafeedRoot, reqwest::Error> {
-    reqwest::get(datafeed_url(VnasEnvironment::Live))
-        .await?
-        .json::<DatafeedRoot>()
-        .await
 }
 
 async fn initialize_rsmq(
@@ -120,4 +107,38 @@ async fn initialize_rsmq(
     }
 
     Ok(rsmq)
+}
+
+#[derive(Error, Debug)]
+enum DatafeedFetchError {
+    #[error(transparent)]
+    Reqwest(#[from] reqwest::Error),
+    #[error(transparent)]
+    Deserialize(#[from] serde_json::Error),
+    #[error(transparent)]
+    TimestampDeserialize(#[from] chrono::format::ParseError),
+    #[error("unable to find or parse updatedAt field in JSON")]
+    MissingUpdatedAt,
+}
+
+async fn fetch_datafeed_bytes_and_timestamp(
+    client: &reqwest::Client,
+) -> Result<(Vec<u8>, DateTime<Utc>), DatafeedFetchError> {
+    let resp = client
+        .get(datafeed_url(VnasEnvironment::Live))
+        .send()
+        .await?
+        .error_for_status()?
+        .text()
+        .await?;
+
+    let value: Value = serde_json::from_str(&resp)?;
+    if let Some(timestamp_val) = value.get("updatedAt")
+        && let Some(timestamp_str) = timestamp_val.as_str()
+    {
+        let timestamp = DateTime::parse_from_rfc3339(timestamp_str)?;
+        Ok((resp.into_bytes(), timestamp.with_timezone(&Utc)))
+    } else {
+        Err(DatafeedFetchError::MissingUpdatedAt)
+    }
 }

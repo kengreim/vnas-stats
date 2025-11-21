@@ -2,7 +2,7 @@ mod database;
 
 use rsmq_async::{Rsmq, RsmqConnection, RsmqError, RsmqOptions};
 use shared::vnas::datafeed::DatafeedRoot;
-use shared::{PostgresConfig, RedisConfig, RedisConfigLoader, load_config};
+use shared::{PostgresConfig, RedisConfig, load_config};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Pool, Postgres};
 use std::str;
@@ -104,7 +104,7 @@ async fn main() -> Result<(), anyhow::Error> {
 }
 
 async fn initialize_rsmq(queue_name: &str, config: &RedisConfig) -> Result<Rsmq, RsmqError> {
-    let connection_options = RsmqOptions::from_config(config);
+    let connection_options = RsmqOptions::from(config);
 
     let mut rsmq = Rsmq::new(connection_options).await?;
     let queues = rsmq.list_queues().await?;
