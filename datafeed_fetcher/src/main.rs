@@ -1,9 +1,9 @@
 use chrono::{DateTime, Utc};
 use rsmq_async::{Rsmq, RsmqConnection, RsmqError, RsmqOptions};
 use serde_json::Value;
+use shared::load_config;
 use shared::vnas::datafeed::{VnasEnvironment, datafeed_url};
-use shared::{load_config, vnas};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use thiserror::Error;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};

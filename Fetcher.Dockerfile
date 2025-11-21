@@ -1,4 +1,4 @@
-FROM rust:1.85.1 AS builder
+FROM rust:1.91.1 AS builder
 
 RUN update-ca-certificates
 
@@ -22,7 +22,7 @@ COPY ./ .
 # We no longer need to use the x86_64-unknown-linux-musl target
 RUN cargo build -p datafeed_fetcher --release
 
-FROM debian:bookworm-slim as final
+FROM debian:trixie-slim as final
 
 RUN apt-get update && apt install -y openssl && apt install -y ca-certificates
 
