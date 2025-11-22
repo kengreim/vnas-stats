@@ -1,6 +1,4 @@
-use crate::database::models::{
-    ActiveSessionKey, ControllerSession, QueuedDatafeed, UserRating, VatsimFacilityType,
-};
+use crate::database::models::{ActiveSessionKey, ControllerSession, QueuedDatafeed, UserRating};
 use chrono::{DateTime, Utc};
 use shared::vnas::datafeed::Controller;
 use sqlx::{Executor, Pool, Postgres};
@@ -55,7 +53,6 @@ where
 {
     let user_rating: UserRating = controller.vatsim_data.user_rating.into();
     let requested_rating: UserRating = controller.vatsim_data.requested_rating.into();
-    let vatsim_facility_type: VatsimFacilityType = controller.vatsim_data.facility_type.into();
     let id = Uuid::now_v7();
 
     sqlx::query(
@@ -73,9 +70,8 @@ where
             name,
             user_rating,
             requested_rating,
-            callsign,
-            vatsim_facility_type,
-            primary_frequency
+            connected_callsign,
+            primary_position_id
         )
         VALUES (
             $1, $2, $3, NULL, NULL, $4, TRUE, $5, $6, $7, $8, $9, $10, $11, $12
@@ -92,8 +88,7 @@ where
     .bind(user_rating)
     .bind(requested_rating)
     .bind(controller.vatsim_data.callsign.clone())
-    .bind(vatsim_facility_type)
-    .bind(controller.vatsim_data.primary_frequency)
+    .bind(controller.primary_position_id.clone())
     .execute(executor)
     .await
     .map_err(QueryError::from)?;
@@ -112,7 +107,6 @@ where
 {
     let user_rating: UserRating = controller.vatsim_data.user_rating.into();
     let requested_rating: UserRating = controller.vatsim_data.requested_rating.into();
-    let vatsim_facility_type: VatsimFacilityType = controller.vatsim_data.facility_type.into();
 
     sqlx::query(
         r#"
@@ -123,9 +117,8 @@ where
             name = $4,
             user_rating = $5,
             requested_rating = $6,
-            callsign = $7,
-            vatsim_facility_type = $8,
-            primary_frequency = $9
+            connected_callsign = $7,
+            primary_position_id = $8
         WHERE id = $1
         "#,
     )
@@ -136,8 +129,7 @@ where
     .bind(user_rating)
     .bind(requested_rating)
     .bind(controller.vatsim_data.callsign.clone())
-    .bind(vatsim_facility_type)
-    .bind(controller.vatsim_data.primary_frequency)
+    .bind(controller.primary_position_id.clone())
     .execute(executor)
     .await
     .map(|_| ())

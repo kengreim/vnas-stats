@@ -2,7 +2,6 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use shared::vnas::datafeed::UserRating as DatafeedUserRating;
-use shared::vnas::datafeed::VatsimFacilityType as DatafeedVatsimFacilityType;
 use sqlx::postgres::types::PgInterval;
 use uuid::Uuid;
 
@@ -20,9 +19,8 @@ pub struct ControllerSession {
     pub name: String,
     pub user_rating: UserRating,
     pub requested_rating: UserRating,
-    pub callsign: String,
-    pub vatsim_facility_type: VatsimFacilityType,
-    pub primary_frequency: i32,
+    pub connected_callsign: String,
+    pub primary_position_id: String,
 }
 
 #[derive(Debug, sqlx::FromRow, Clone)]
@@ -76,28 +74,4 @@ impl From<DatafeedUserRating> for UserRating {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, PartialOrd, sqlx::Type, Deserialize, Serialize)]
-#[sqlx(type_name = "vatsim_facility_type", rename_all = "snake_case")]
-pub enum VatsimFacilityType {
-    Observer,
-    FlightServiceStation,
-    ClearanceDelivery,
-    Ground,
-    Tower,
-    ApproachDeparture,
-    Center,
-}
-
-impl From<DatafeedVatsimFacilityType> for VatsimFacilityType {
-    fn from(value: DatafeedVatsimFacilityType) -> Self {
-        match value {
-            DatafeedVatsimFacilityType::Observer => Self::Observer,
-            DatafeedVatsimFacilityType::FlightServiceStation => Self::FlightServiceStation,
-            DatafeedVatsimFacilityType::ClearanceDelivery => Self::ClearanceDelivery,
-            DatafeedVatsimFacilityType::Ground => Self::Ground,
-            DatafeedVatsimFacilityType::Tower => Self::Tower,
-            DatafeedVatsimFacilityType::ApproachDeparture => Self::ApproachDeparture,
-            DatafeedVatsimFacilityType::Center => Self::Center,
-        }
-    }
-}
+// VATSIM facility type is still available from the datafeed models if needed later, but we do not persist it.

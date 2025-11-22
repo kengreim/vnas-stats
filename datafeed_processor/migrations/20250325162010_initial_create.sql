@@ -37,9 +37,8 @@ create table controller_sessions
     name                 text                 not null,
     user_rating          user_rating          not null,
     requested_rating     user_rating          not null,
-    callsign             text                 not null,
-    vatsim_facility_type vatsim_facility_type not null,
-    primary_frequency    integer              not null,
+    connected_callsign   text                 not null,
+    primary_position_id  text                 not null,
     constraint controller_sessions_pkey primary key (id)
 );
 
