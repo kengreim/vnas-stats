@@ -1,7 +1,9 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use shared::vnas::datafeed::UserRating as DatafeedUserRating;
 use shared::vnas::datafeed::VatsimFacilityType as DatafeedVatsimFacilityType;
+use sqlx::postgres::types::PgInterval;
 use uuid::Uuid;
 
 #[derive(Debug, sqlx::FromRow, Clone)]
@@ -9,8 +11,9 @@ pub struct ControllerSession {
     pub id: Uuid,
     pub login_time: DateTime<Utc>,
     pub start_time: DateTime<Utc>,
-    pub end_time: DateTime<Utc>,
-    pub duration: sqlx::postgres::types::PgInterval,
+    pub end_time: Option<DateTime<Utc>>,
+    pub duration: Option<PgInterval>,
+    pub last_seen: DateTime<Utc>,
     pub is_active: bool,
     pub is_observer: bool,
     pub cid: i32,
@@ -18,8 +21,23 @@ pub struct ControllerSession {
     pub user_rating: UserRating,
     pub requested_rating: UserRating,
     pub callsign: String,
-    pub facility_type: String,
+    pub vatsim_facility_type: VatsimFacilityType,
     pub primary_frequency: i32,
+}
+
+#[derive(Debug, sqlx::FromRow, Clone)]
+pub struct ActiveSessionKey {
+    pub id: Uuid,
+    pub cid: i32,
+    pub login_time: DateTime<Utc>,
+}
+
+#[derive(Debug, sqlx::FromRow, Clone)]
+pub struct QueuedDatafeed {
+    pub id: Uuid,
+    pub updated_at: DateTime<Utc>,
+    pub payload: Value,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd, sqlx::Type, Deserialize, Serialize)]

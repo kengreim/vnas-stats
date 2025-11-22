@@ -1,8 +1,8 @@
 pub mod vnas;
 
+use crate::error::ConfigError;
 use figment::Figment;
 use figment::providers::{Env, Format, Toml};
-use rsmq_async::RsmqOptions;
 use serde::Deserialize;
 
 pub const DATAFEED_QUEUE_NAME: &str = "vnas_stats";
@@ -10,14 +10,8 @@ pub const ENV_VAR_PREFIX: &str = "VNAS_STATS_";
 pub const SETTINGS_FILE: &str = "Settings.toml";
 
 #[derive(Debug, Deserialize)]
-pub struct RedisConfig {
-    pub host: String,
-    pub port: u16,
-    pub db: u8,
-    pub username: Option<String>,
-    pub password: Option<String>,
-    pub namespace: String,
-    pub force_recreate: bool,
+pub struct Config {
+    pub postgres: PostgresConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -25,30 +19,32 @@ pub struct PostgresConfig {
     pub connection_string: String,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct Config {
-    pub redis: RedisConfig,
-    pub postgres: PostgresConfig,
-}
-
-pub fn load_config() -> anyhow::Result<Config> {
+pub fn load_config() -> Result<Config, ConfigError> {
     Ok(Figment::new()
         .merge(Toml::file(SETTINGS_FILE))
         .merge(Env::prefixed(ENV_VAR_PREFIX).split("_"))
         .extract::<Config>()?)
 }
 
-impl From<&RedisConfig> for RsmqOptions {
-    fn from(config: &RedisConfig) -> Self {
-        Self {
-            host: config.host.clone(),
-            port: config.port,
-            db: config.db,
-            realtime: false,
-            username: config.username.clone(),
-            password: config.password.clone(),
-            ns: config.namespace.clone(),
-            protocol: Default::default(),
-        }
+pub mod error {
+    use thiserror::Error;
+    use tracing::dispatcher::SetGlobalDefaultError;
+
+    #[derive(Debug, Error)]
+    pub enum ConfigError {
+        #[error("failed to load configuration: {0}")]
+        Figment(#[from] figment::Error),
+    }
+
+    #[derive(Debug, Error)]
+    pub enum InitializationError {
+        #[error(transparent)]
+        Tracing(#[from] SetGlobalDefaultError),
+        #[error(transparent)]
+        Config(#[from] crate::ConfigError),
+        #[error(transparent)]
+        Migration(#[from] sqlx::migrate::MigrateError),
+        #[error(transparent)]
+        Db(#[from] sqlx::Error),
     }
 }

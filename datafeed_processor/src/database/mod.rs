@@ -1,2 +1,2 @@
-mod models;
-mod queries;
+pub mod models;
+pub mod queries;

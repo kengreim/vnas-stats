@@ -1,10 +1,246 @@
-use crate::database::models::ControllerSession;
-use sqlx::{Error, Pool, Postgres};
+use crate::database::models::{
+    ActiveSessionKey, ControllerSession, QueuedDatafeed, UserRating, VatsimFacilityType,
+};
+use chrono::{DateTime, Utc};
+use shared::vnas::datafeed::Controller;
+use sqlx::{Executor, Pool, Postgres};
+use thiserror::Error;
+use uuid::Uuid;
+
+#[derive(Debug, Error)]
+pub enum QueryError {
+    #[error("database error: {0}")]
+    Db(#[from] sqlx::Error),
+    #[error("payload serialization failed: {0}")]
+    Serialize(#[from] serde_json::Error),
+    #[error("payload compression failed: {0}")]
+    Compress(#[from] std::io::Error),
+}
 
 pub async fn get_all_controller_sessions(
     pool: &Pool<Postgres>,
-) -> Result<Vec<ControllerSession>, Error> {
-    sqlx::query_as("SELECT * FROM controller_sessions")
+) -> Result<Vec<ControllerSession>, QueryError> {
+    sqlx::query_as::<_, ControllerSession>("SELECT * FROM controller_sessions")
         .fetch_all(pool)
         .await
+        .map_err(QueryError::from)
+}
+
+pub async fn get_active_session_keys<'e, E>(
+    executor: E,
+) -> Result<Vec<ActiveSessionKey>, QueryError>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    sqlx::query_as::<_, ActiveSessionKey>(
+        r#"
+        SELECT id, cid, login_time
+        FROM controller_sessions
+        WHERE is_active = TRUE
+        "#,
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(QueryError::from)
+}
+
+pub async fn insert_controller_session<'e, E>(
+    executor: E,
+    controller: &Controller,
+    cid: i32,
+    seen_at: DateTime<Utc>,
+) -> Result<Uuid, QueryError>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    let user_rating: UserRating = controller.vatsim_data.user_rating.into();
+    let requested_rating: UserRating = controller.vatsim_data.requested_rating.into();
+    let vatsim_facility_type: VatsimFacilityType = controller.vatsim_data.facility_type.into();
+    let id = Uuid::now_v7();
+
+    sqlx::query(
+        r#"
+        INSERT INTO controller_sessions (
+            id,
+            login_time,
+            start_time,
+            end_time,
+            duration,
+            last_seen,
+            is_active,
+            is_observer,
+            cid,
+            name,
+            user_rating,
+            requested_rating,
+            callsign,
+            vatsim_facility_type,
+            primary_frequency
+        )
+        VALUES (
+            $1, $2, $3, NULL, NULL, $4, TRUE, $5, $6, $7, $8, $9, $10, $11, $12
+        )
+        "#,
+    )
+    .bind(id)
+    .bind(controller.login_time)
+    .bind(seen_at)
+    .bind(seen_at)
+    .bind(controller.is_observer)
+    .bind(cid)
+    .bind(controller.vatsim_data.real_name.clone())
+    .bind(user_rating)
+    .bind(requested_rating)
+    .bind(controller.vatsim_data.callsign.clone())
+    .bind(vatsim_facility_type)
+    .bind(controller.vatsim_data.primary_frequency)
+    .execute(executor)
+    .await
+    .map_err(QueryError::from)?;
+
+    Ok(id)
+}
+
+pub async fn update_active_controller_session<'e, E>(
+    executor: E,
+    session_id: Uuid,
+    controller: &Controller,
+    seen_at: DateTime<Utc>,
+) -> Result<(), QueryError>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    let user_rating: UserRating = controller.vatsim_data.user_rating.into();
+    let requested_rating: UserRating = controller.vatsim_data.requested_rating.into();
+    let vatsim_facility_type: VatsimFacilityType = controller.vatsim_data.facility_type.into();
+
+    sqlx::query(
+        r#"
+        UPDATE controller_sessions
+        SET
+            last_seen = $2,
+            is_observer = $3,
+            name = $4,
+            user_rating = $5,
+            requested_rating = $6,
+            callsign = $7,
+            vatsim_facility_type = $8,
+            primary_frequency = $9
+        WHERE id = $1
+        "#,
+    )
+    .bind(session_id)
+    .bind(seen_at)
+    .bind(controller.is_observer)
+    .bind(controller.vatsim_data.real_name.clone())
+    .bind(user_rating)
+    .bind(requested_rating)
+    .bind(controller.vatsim_data.callsign.clone())
+    .bind(vatsim_facility_type)
+    .bind(controller.vatsim_data.primary_frequency)
+    .execute(executor)
+    .await
+    .map(|_| ())
+    .map_err(QueryError::from)
+}
+
+pub async fn complete_sessions<'e, E>(
+    executor: E,
+    ids: &[Uuid],
+    ended_at: DateTime<Utc>,
+) -> Result<u64, QueryError>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    let result = sqlx::query(
+        r#"
+        UPDATE controller_sessions
+        SET
+            is_active = FALSE,
+            end_time = $2,
+            duration = $2 - start_time,
+            last_seen = $2
+        WHERE id = ANY($1)
+        "#,
+    )
+    .bind(ids)
+    .bind(ended_at)
+    .execute(executor)
+    .await
+    .map_err(QueryError::from)?;
+
+    Ok(result.rows_affected())
+}
+
+pub async fn fetch_datafeed_batch<'e, E>(
+    executor: E,
+    limit: i64,
+) -> Result<Vec<QueuedDatafeed>, QueryError>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    sqlx::query_as::<_, QueuedDatafeed>(
+        r#"
+        SELECT id, updated_at, payload, created_at
+        FROM datafeed_queue
+        ORDER BY created_at
+        FOR UPDATE SKIP LOCKED
+        LIMIT $1
+        "#,
+    )
+    .bind(limit)
+    .fetch_all(executor)
+    .await
+    .map_err(QueryError::from)
+}
+
+pub async fn archive_datafeed<'e, E>(
+    executor: E,
+    message: &QueuedDatafeed,
+    processed_at: DateTime<Utc>,
+) -> Result<(), QueryError>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    let payload_bytes = serde_json::to_vec(&message.payload)?;
+    let original_size = payload_bytes.len() as i32;
+    let payload_compressed = zstd::encode_all(payload_bytes.as_slice(), 3)?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO datafeed_archive (
+            id,
+            updated_at,
+            payload_compressed,
+            original_size_bytes,
+            compression_algo,
+            created_at,
+            processed_at
+        )
+        VALUES ($1, $2, $3, $4, 'zstd', $5, $6)
+        "#,
+    )
+    .bind(message.id)
+    .bind(message.updated_at)
+    .bind(payload_compressed)
+    .bind(original_size)
+    .bind(message.created_at)
+    .bind(processed_at)
+    .execute(executor)
+    .await
+    .map_err(QueryError::from)?;
+
+    Ok(())
+}
+
+pub async fn delete_queued_datafeed<'e, E>(executor: E, id: Uuid) -> Result<(), QueryError>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    sqlx::query("DELETE FROM datafeed_queue WHERE id = $1")
+        .bind(id)
+        .execute(executor)
+        .await
+        .map(|_| ())
+        .map_err(QueryError::from)
 }
