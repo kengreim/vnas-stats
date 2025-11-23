@@ -23,7 +23,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      RUST_LOG: datafeed_fetcher=debug
+      RUST_LOG: datafeed_fetcher=debug,sqlx=debug
 
   datafeed_processor:
     build:

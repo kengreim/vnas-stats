@@ -1,9 +1,2 @@
-[redis]
-host = "redis"
-port = 6379
-db = 0
-namespace = "rsmq"
-force_recreate = true
-
 [postgres]
-connection_string = "postgres://passport:passport@postgres/passport"
+connection_string = "postgres://vnasstats:vnasstats@postgres/vnasstats"
