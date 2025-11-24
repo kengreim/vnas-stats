@@ -11,7 +11,6 @@ use shared::vnas::api::minimal::{ArtccRoot as MinimalArtccRoot, ArtccRoot};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Pool, Postgres, Row};
 use thiserror::Error;
-use tokio::time::{Duration, sleep};
 use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
 
@@ -31,16 +30,13 @@ async fn main() -> Result<(), AppError> {
     let db_pool = initialize_db(&config.postgres).await?;
     let client = Client::new();
 
-    info!("starting fetch loop");
-    loop {
-        match fetch_and_process(&client, &db_pool).await {
-            Ok(_) => info!("ARTCC data sync was successful"),
-            Err(e) => error!(error = ?e, "failed to sync ARTCC data"),
-        }
-
-        info!("sleeping for 1 hour");
-        sleep(Duration::from_secs(60 * 60)).await;
+    let res = fetch_and_process(&client, &db_pool).await;
+    match res {
+        Ok(()) => info!("ARTCC data sync was successful"),
+        Err(ref e) => error!(error = ?e, "failed to sync ARTCC data"),
     }
+
+    res
 }
 
 async fn initialize_db(pg_config: &PostgresConfig) -> Result<Pool<Postgres>, AppError> {
