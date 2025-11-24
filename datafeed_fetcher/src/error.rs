@@ -1,5 +1,4 @@
 use thiserror::Error;
-use tracing::dispatcher::SetGlobalDefaultError;
 
 #[derive(Error, Debug)]
 pub enum FetchError {
