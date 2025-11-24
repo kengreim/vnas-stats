@@ -27,16 +27,18 @@ async fn main() -> Result<(), AppError> {
     tracing::subscriber::set_global_default(subscriber).map_err(InitializationError::from)?;
 
     let config = load_config().map_err(InitializationError::from)?;
-    info!(config = ?config, "Config loaded");
+    info!(config = ?config, "config loaded");
     let db_pool = initialize_db(&config.postgres).await?;
     let client = Client::new();
 
+    info!("starting fetch loop");
     loop {
         match fetch_and_process(&client, &db_pool).await {
-            Ok(_) => info!("ARTCC data sync was successfuly"),
-            Err(e) => error!(error = ?e, "Failed to sync ARTCC data"),
+            Ok(_) => info!("ARTCC data sync was successful"),
+            Err(e) => error!(error = ?e, "failed to sync ARTCC data"),
         }
 
+        info!("sleeping for 1 hour");
         sleep(Duration::from_secs(60 * 60)).await;
     }
 }
@@ -59,7 +61,7 @@ async fn fetch_and_process(client: &Client, pool: &Pool<Postgres>) -> Result<(),
 }
 
 async fn fetch_artccs(client: &Client) -> Result<Vec<MinimalArtccRoot>, AppError> {
-    debug!("Fetching all ARTCCs data from vNAS API");
+    debug!("fetching all ARTCCs data from vNAS API");
     let resp = client
         .get(shared::vnas::api::ALL_ARTCCS_ENDPOINT)
         .send()
@@ -67,6 +69,7 @@ async fn fetch_artccs(client: &Client) -> Result<Vec<MinimalArtccRoot>, AppError
         .error_for_status()?
         .json::<Vec<MinimalArtccRoot>>()
         .await?;
+    debug!(len = resp.len(), "fetched ARTCCs from vNAS API");
 
     Ok(resp)
 }
@@ -114,9 +117,9 @@ async fn process_artccs(
         .map(|a| a.id.to_owned())
         .collect::<Vec<_>>();
     if updated_artcc_ids.is_empty() {
-        info!("Found no ARTCCs to update");
+        info!("found no ARTCCs to update");
     } else {
-        info!(ids = ?updated_artcc_ids, "Found ARTCCs to update");
+        info!(ids = ?updated_artcc_ids, "found ARTCCs to update");
     }
 
     for artcc in artccs_to_update {
@@ -184,7 +187,7 @@ async fn process_artccs(
         .bind(&processed_artcc_ids_refs)
         .execute(&mut *tx)
         .await?;
-        info!(n = n.rows_affected(), "Marked facilities inactive");
+        info!(n = n.rows_affected(), "marked facilities inactive");
     }
 
     for position in &positions {
@@ -248,7 +251,7 @@ async fn process_artccs(
         .bind(&processed_artcc_ids_refs)
         .execute(&mut *tx)
         .await?;
-        info!(n = n.rows_affected(), "Marked positions inactive")
+        info!(n = n.rows_affected(), "marked positions inactive")
     }
 
     tx.commit().await?;
