@@ -4,6 +4,42 @@ use std::fmt::{Display, Formatter};
 
 pub const ALL_ARTCCS_ENDPOINT: &str = "https://data-api.vnas.vatsim.net/api/artccs/";
 
+pub mod minimal {
+    use crate::vnas::api::FacilityType;
+    use chrono::{DateTime, Utc};
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct ArtccRoot {
+        pub id: String,
+        pub last_updated_at: DateTime<Utc>,
+        pub facility: Facility,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Facility {
+        pub id: String,
+        #[serde(rename = "type")]
+        pub type_field: FacilityType,
+        pub name: String,
+        pub child_facilities: Vec<Facility>,
+        pub positions: Vec<Position>,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Position {
+        pub id: String,
+        pub name: String,
+        pub starred: bool,
+        pub radio_name: String,
+        pub callsign: String,
+        pub frequency: i64,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]

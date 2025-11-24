@@ -6,7 +6,7 @@ use figment::providers::{Env, Format, Toml};
 use serde::Deserialize;
 
 pub const DATAFEED_QUEUE_NAME: &str = "vnas_stats";
-pub const ENV_VAR_PREFIX: &str = "VNAS_STATS_";
+pub const ENV_VAR_PREFIX: &str = "VNAS_STATS__";
 pub const SETTINGS_FILE: &str = "Settings.toml";
 
 #[derive(Debug, Deserialize)]
@@ -22,7 +22,7 @@ pub struct PostgresConfig {
 pub fn load_config() -> Result<Config, ConfigError> {
     Ok(Figment::new()
         .merge(Toml::file(SETTINGS_FILE))
-        .merge(Env::prefixed(ENV_VAR_PREFIX).split("_"))
+        .merge(Env::prefixed(ENV_VAR_PREFIX).split("__"))
         .extract::<Config>()?)
 }
 
@@ -41,7 +41,7 @@ pub mod error {
         #[error(transparent)]
         Tracing(#[from] SetGlobalDefaultError),
         #[error(transparent)]
-        Config(#[from] crate::ConfigError),
+        Config(#[from] ConfigError),
         #[error(transparent)]
         Migration(#[from] sqlx::migrate::MigrateError),
         #[error(transparent)]

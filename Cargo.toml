@@ -1,5 +1,5 @@
 [workspace]
-members = ["datafeed_fetcher", "datafeed_processor", "shared"]
+members = ["datafeed_fetcher", "datafeed_processor", "shared", "artcc_fetcher"]
 resolver = "2"
 
 [workspace.dependencies]

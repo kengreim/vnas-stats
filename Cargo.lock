@@ -27,6 +27,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "artcc_fetcher"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "reqwest",
+ "shared",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "atoi"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

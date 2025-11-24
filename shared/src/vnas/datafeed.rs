@@ -23,7 +23,6 @@ pub const fn datafeed_url(env: VnasEnvironment) -> &'static str {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
 pub struct DatafeedRoot {
     pub updated_at: DateTime<Utc>,
     pub controllers: Vec<Controller>,
@@ -31,7 +30,6 @@ pub struct DatafeedRoot {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
 pub struct Controller {
     pub artcc_id: String,
     pub primary_facility_id: String,
@@ -77,7 +75,6 @@ pub enum UserRating {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
 pub struct VatsimData {
     pub cid: String,
     pub real_name: String,
@@ -102,7 +99,6 @@ pub enum VatsimFacilityType {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
 pub struct Position {
     pub facility_id: String,
     pub facility_name: String,
@@ -120,14 +116,12 @@ pub struct Position {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
 pub struct EramPositionData {
     pub sector_id: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
 pub struct StarsPositionData {
     pub subset: i32,
     pub sector_id: String,

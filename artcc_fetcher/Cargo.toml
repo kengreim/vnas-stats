@@ -1,0 +1,14 @@
+[package]
+name = "artcc_fetcher"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+chrono.workspace = true
+reqwest.workspace = true
+shared = { path = "../shared" }
+sqlx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
