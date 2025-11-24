@@ -1,42 +1,27 @@
 FROM rust:1.91.1 AS builder
+WORKDIR /app
 
-RUN update-ca-certificates
+# Pre-fetch dependencies using manifest files for cache efficiency
+COPY Cargo.toml Cargo.lock ./
+COPY shared/Cargo.toml shared/
+COPY datafeed_fetcher/Cargo.toml datafeed_fetcher/
+RUN cargo fetch
 
-# Create appuser
-ENV USER=fetcher
-ENV UID=10001
+# Copy sources
+COPY shared ./shared
+COPY datafeed_fetcher ./datafeed_fetcher
+COPY Settings.toml ./Settings.toml
 
-RUN adduser \
-    --disabled-password \
-    --gecos "" \
-    --home "/nonexistent" \
-    --shell "/sbin/nologin" \
-    --no-create-home \
-    --uid "${UID}" \
-    "${USER}"
-
-WORKDIR /fetcher
-
-COPY ./ .
-
-# We no longer need to use the x86_64-unknown-linux-musl target
-RUN cargo build -p datafeed_fetcher --release
+# Build release binary
+RUN cargo build --release -p datafeed_fetcher
 
 FROM debian:trixie-slim as final
-
-RUN apt-get update && apt install -y openssl && apt install -y ca-certificates
-
-# Import from builder.
-COPY --from=builder /etc/passwd /etc/passwd
-COPY --from=builder /etc/group /etc/group
-
-WORKDIR /fetcher
+RUN apt-get update && apt install -y openssl && apt install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
 
 # Copy our build and settings file
-COPY --from=builder /fetcher/target/release/datafeed_fetcher ./
-COPY --from=builder /fetcher/Settings.toml ./
+COPY --from=builder /app/target/release/datafeed_fetcher ./datafeed_fetcher
+COPY --from=builder /app/Settings.toml ./Settings.toml
+COPY --from=builder /app/datafeed_processor/migrations ./migrations
 
-# Use an unprivileged user.
-USER fetcher:fetcher
-
-CMD ["/fetcher/datafeed_fetcher"]
+CMD ["/app/datafeed_fetcher"]
