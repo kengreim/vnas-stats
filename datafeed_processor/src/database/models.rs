@@ -21,6 +21,8 @@ pub struct ControllerSession {
     pub requested_rating: UserRating,
     pub connected_callsign: String,
     pub primary_position_id: String,
+    pub callsign_session_id: Uuid,
+    pub position_session_id: Uuid,
 }
 
 #[derive(Debug, sqlx::FromRow, Clone)]
@@ -28,6 +30,10 @@ pub struct ActiveSessionKey {
     pub id: Uuid,
     pub cid: i32,
     pub login_time: DateTime<Utc>,
+    pub connected_callsign: String,
+    pub callsign_session_id: Uuid,
+    pub primary_position_id: String,
+    pub position_session_id: Uuid,
 }
 
 #[derive(Debug, sqlx::FromRow, Clone)]
@@ -35,6 +41,31 @@ pub struct QueuedDatafeed {
     pub id: Uuid,
     pub updated_at: DateTime<Utc>,
     pub payload: Value,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, sqlx::FromRow, Clone)]
+pub struct CallsignSession {
+    pub id: Uuid,
+    pub prefix: String,
+    pub suffix: String,
+    pub start_time: DateTime<Utc>,
+    pub end_time: Option<DateTime<Utc>>,
+    pub duration: Option<PgInterval>,
+    pub last_seen: DateTime<Utc>,
+    pub is_active: bool,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, sqlx::FromRow, Clone)]
+pub struct PositionSession {
+    pub id: Uuid,
+    pub position_id: String,
+    pub start_time: DateTime<Utc>,
+    pub end_time: Option<DateTime<Utc>>,
+    pub duration: Option<PgInterval>,
+    pub last_seen: DateTime<Utc>,
+    pub is_active: bool,
     pub created_at: DateTime<Utc>,
 }
 

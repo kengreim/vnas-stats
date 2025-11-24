@@ -13,15 +13,46 @@ create type user_rating as enum (
     'administrator'
     );
 
-create type vatsim_facility_type as enum (
-    'observer',
-    'flight_service_station',
-    'clearance_delivery',
-    'ground',
-    'tower',
-    'approach_departure',
-    'center'
-    );
+create table callsign_sessions
+(
+    id           uuid        not null,
+    prefix       text        not null,
+    suffix       text        not null,
+    start_time   timestamptz not null,
+    end_time     timestamptz,
+    duration     interval,
+    last_seen    timestamptz not null default now(),
+    is_active    bool        not null,
+    created_at   timestamptz not null default now(),
+    constraint callsign_sessions_pkey primary key (id)
+);
+
+create unique index uq_callsign_sessions_active_prefix_suffix
+    on callsign_sessions (prefix, suffix)
+    where is_active = true;
+
+create index idx_callsign_sessions_active on callsign_sessions (is_active);
+create index idx_callsign_sessions_last_seen on callsign_sessions (last_seen);
+
+create table position_sessions
+(
+    id           uuid        not null,
+    position_id  text        not null,
+    start_time   timestamptz not null,
+    end_time     timestamptz,
+    duration     interval,
+    last_seen    timestamptz not null default now(),
+    is_active    bool        not null,
+    created_at   timestamptz not null default now(),
+    constraint position_sessions_pkey primary key (id)
+);
+
+create unique index uq_position_sessions_active_position
+    on position_sessions (position_id)
+    where is_active = true;
+
+create index idx_position_sessions_active on position_sessions (is_active);
+create index idx_position_sessions_last_seen on position_sessions (last_seen);
 
 create table controller_sessions
 (
@@ -39,7 +70,11 @@ create table controller_sessions
     requested_rating     user_rating          not null,
     connected_callsign   text                 not null,
     primary_position_id  text                 not null,
-    constraint controller_sessions_pkey primary key (id)
+    callsign_session_id  uuid                 not null,
+    position_session_id  uuid                 not null,
+    constraint controller_sessions_pkey primary key (id),
+    constraint controller_sessions_callsign_session_fk foreign key (callsign_session_id) references callsign_sessions (id),
+    constraint controller_sessions_position_session_fk foreign key (position_session_id) references position_sessions (id)
 );
 
 -- Only one active session per controller ID at a time.
@@ -50,6 +85,8 @@ create unique index uq_controller_sessions_active_cid
 create index idx_controller_sessions_active on controller_sessions (is_active, cid);
 create index idx_controller_sessions_end_time on controller_sessions (end_time) where is_active = false;
 create index idx_controller_sessions_login_time on controller_sessions (login_time);
+create index idx_controller_sessions_callsign_session_id on controller_sessions (callsign_session_id);
+create index idx_controller_sessions_position_session_id on controller_sessions (position_session_id);
 
 create table datafeed_queue
 (
