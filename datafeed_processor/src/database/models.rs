@@ -5,25 +5,25 @@ use shared::vnas::datafeed::UserRating as DatafeedUserRating;
 use sqlx::postgres::types::PgInterval;
 use uuid::Uuid;
 
-#[derive(Debug, sqlx::FromRow, Clone)]
-pub struct ControllerSession {
-    pub id: Uuid,
-    pub login_time: DateTime<Utc>,
-    pub start_time: DateTime<Utc>,
-    pub end_time: Option<DateTime<Utc>>,
-    pub duration: Option<PgInterval>,
-    pub last_seen: DateTime<Utc>,
-    pub is_active: bool,
-    pub is_observer: bool,
-    pub cid: i32,
-    pub name: String,
-    pub user_rating: UserRating,
-    pub requested_rating: UserRating,
-    pub connected_callsign: String,
-    pub primary_position_id: String,
-    pub callsign_session_id: Uuid,
-    pub position_session_id: Uuid,
-}
+// #[derive(Debug, sqlx::FromRow, Clone)]
+// pub struct ControllerSession {
+//     pub id: Uuid,
+//     pub login_time: DateTime<Utc>,
+//     pub start_time: DateTime<Utc>,
+//     pub end_time: Option<DateTime<Utc>>,
+//     pub duration: Option<PgInterval>,
+//     pub last_seen: DateTime<Utc>,
+//     pub is_active: bool,
+//     pub is_observer: bool,
+//     pub cid: i32,
+//     pub name: String,
+//     pub user_rating: UserRating,
+//     pub requested_rating: UserRating,
+//     pub connected_callsign: String,
+//     pub primary_position_id: String,
+//     pub callsign_session_id: Uuid,
+//     pub position_session_id: Uuid,
+// }
 
 #[derive(Debug, sqlx::FromRow, Clone)]
 pub struct ActiveSessionKey {

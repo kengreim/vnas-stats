@@ -1,7 +1,9 @@
-use crate::database::models::{ActiveSessionKey, ControllerSession, QueuedDatafeed, UserRating};
+use crate::database::models::{
+    ActiveSessionKey, CallsignSession, PositionSession, QueuedDatafeed, UserRating,
+};
 use chrono::{DateTime, Utc};
 use shared::vnas::datafeed::Controller;
-use sqlx::{Executor, Pool, Postgres};
+use sqlx::{Executor, Postgres};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -15,154 +17,14 @@ pub enum QueryError {
     Compress(#[from] std::io::Error),
 }
 
-pub async fn get_all_controller_sessions(
-    pool: &Pool<Postgres>,
-) -> Result<Vec<ControllerSession>, QueryError> {
-    sqlx::query_as::<_, ControllerSession>("SELECT * FROM controller_sessions")
-        .fetch_all(pool)
-        .await
-        .map_err(QueryError::from)
-}
-
-pub async fn get_active_session_keys<'e, E>(
-    executor: E,
-) -> Result<Vec<ActiveSessionKey>, QueryError>
-where
-    E: Executor<'e, Database = Postgres>,
-{
-    sqlx::query_as::<_, ActiveSessionKey>(
-        r#"
-        SELECT id, cid, login_time
-        FROM controller_sessions
-        WHERE is_active = TRUE
-        "#,
-    )
-    .fetch_all(executor)
-    .await
-    .map_err(QueryError::from)
-}
-
-pub async fn insert_controller_session<'e, E>(
-    executor: E,
-    controller: &Controller,
-    cid: i32,
-    seen_at: DateTime<Utc>,
-) -> Result<Uuid, QueryError>
-where
-    E: Executor<'e, Database = Postgres>,
-{
-    let user_rating: UserRating = controller.vatsim_data.user_rating.into();
-    let requested_rating: UserRating = controller.vatsim_data.requested_rating.into();
-    let id = Uuid::now_v7();
-
-    sqlx::query(
-        r#"
-        INSERT INTO controller_sessions (
-            id,
-            login_time,
-            start_time,
-            end_time,
-            duration,
-            last_seen,
-            is_active,
-            is_observer,
-            cid,
-            name,
-            user_rating,
-            requested_rating,
-            connected_callsign,
-            primary_position_id
-        )
-        VALUES (
-            $1, $2, $3, NULL, NULL, $4, TRUE, $5, $6, $7, $8, $9, $10, $11, $12
-        )
-        "#,
-    )
-    .bind(id)
-    .bind(controller.login_time)
-    .bind(seen_at)
-    .bind(seen_at)
-    .bind(controller.is_observer)
-    .bind(cid)
-    .bind(controller.vatsim_data.real_name.clone())
-    .bind(user_rating)
-    .bind(requested_rating)
-    .bind(controller.vatsim_data.callsign.clone())
-    .bind(controller.primary_position_id.clone())
-    .execute(executor)
-    .await
-    .map_err(QueryError::from)?;
-
-    Ok(id)
-}
-
-pub async fn update_active_controller_session<'e, E>(
-    executor: E,
-    session_id: Uuid,
-    controller: &Controller,
-    seen_at: DateTime<Utc>,
-) -> Result<(), QueryError>
-where
-    E: Executor<'e, Database = Postgres>,
-{
-    let user_rating: UserRating = controller.vatsim_data.user_rating.into();
-    let requested_rating: UserRating = controller.vatsim_data.requested_rating.into();
-
-    sqlx::query(
-        r#"
-        UPDATE controller_sessions
-        SET
-            last_seen = $2,
-            is_observer = $3,
-            name = $4,
-            user_rating = $5,
-            requested_rating = $6,
-            connected_callsign = $7,
-            primary_position_id = $8
-        WHERE id = $1
-        "#,
-    )
-    .bind(session_id)
-    .bind(seen_at)
-    .bind(controller.is_observer)
-    .bind(controller.vatsim_data.real_name.clone())
-    .bind(user_rating)
-    .bind(requested_rating)
-    .bind(controller.vatsim_data.callsign.clone())
-    .bind(controller.primary_position_id.clone())
-    .execute(executor)
-    .await
-    .map(|_| ())
-    .map_err(QueryError::from)
-}
-
-pub async fn complete_sessions<'e, E>(
-    executor: E,
-    ids: &[Uuid],
-    ended_at: DateTime<Utc>,
-) -> Result<u64, QueryError>
-where
-    E: Executor<'e, Database = Postgres>,
-{
-    let result = sqlx::query(
-        r#"
-        UPDATE controller_sessions
-        SET
-            is_active = FALSE,
-            end_time = $2,
-            duration = $2 - start_time,
-            last_seen = $2
-        WHERE id = ANY($1)
-        "#,
-    )
-    .bind(ids)
-    .bind(ended_at)
-    .execute(executor)
-    .await
-    .map_err(QueryError::from)?;
-
-    Ok(result.rows_affected())
-}
+// pub async fn get_all_controller_sessions(
+//     pool: &Pool<Postgres>,
+// ) -> Result<Vec<ControllerSession>, QueryError> {
+//     sqlx::query_as::<_, ControllerSession>("SELECT * FROM controller_sessions")
+//         .fetch_all(pool)
+//         .await
+//         .map_err(QueryError::from)
+// }
 
 pub async fn fetch_datafeed_batch<'e, E>(
     executor: E,
@@ -175,7 +37,7 @@ where
         r#"
         SELECT id, updated_at, payload, created_at
         FROM datafeed_queue
-        ORDER BY created_at
+        ORDER BY updated_at
         FOR UPDATE SKIP LOCKED
         LIMIT $1
         "#,
@@ -235,4 +97,392 @@ where
         .await
         .map(|_| ())
         .map_err(QueryError::from)
+}
+
+pub async fn get_active_controller_session_keys<'e, E>(
+    executor: E,
+) -> Result<Vec<ActiveSessionKey>, QueryError>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    sqlx::query_as::<_, ActiveSessionKey>(
+        r#"
+        SELECT id, cid, login_time, connected_callsign, callsign_session_id, primary_position_id, position_session_id
+        FROM controller_sessions
+        WHERE is_active = TRUE
+        "#,
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(QueryError::from)
+}
+
+pub async fn insert_controller_session<'e, E>(
+    executor: E,
+    controller: &Controller,
+    cid: i32,
+    seen_at: DateTime<Utc>,
+    callsign_session_id: Uuid,
+    position_session_id: Uuid,
+) -> Result<Uuid, QueryError>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    let user_rating: UserRating = controller.vatsim_data.user_rating.into();
+    let requested_rating: UserRating = controller.vatsim_data.requested_rating.into();
+    let id = Uuid::now_v7();
+
+    sqlx::query(
+        r#"
+        INSERT INTO controller_sessions (
+            id,
+            login_time,
+            start_time,
+            end_time,
+            duration,
+            last_seen,
+            is_active,
+            is_observer,
+            cid,
+            name,
+            user_rating,
+            requested_rating,
+            connected_callsign,
+            primary_position_id,
+            callsign_session_id,
+            position_session_id
+        )
+        VALUES (
+            $1, $2, $3, NULL, NULL, $4, TRUE, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+        )
+        "#,
+    )
+    .bind(id)
+    .bind(controller.login_time)
+    .bind(seen_at)
+    .bind(seen_at)
+    .bind(controller.is_observer)
+    .bind(cid)
+    .bind(controller.vatsim_data.real_name.clone())
+    .bind(user_rating)
+    .bind(requested_rating)
+    .bind(controller.vatsim_data.callsign.clone())
+    .bind(controller.primary_position_id.clone())
+    .bind(callsign_session_id)
+    .bind(position_session_id)
+    .execute(executor)
+    .await
+    .map_err(QueryError::from)?;
+
+    Ok(id)
+}
+
+pub async fn update_active_controller_session<'e, E>(
+    executor: E,
+    session_id: Uuid,
+    controller: &Controller,
+    seen_at: DateTime<Utc>,
+) -> Result<(), QueryError>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    let user_rating: UserRating = controller.vatsim_data.user_rating.into();
+    let requested_rating: UserRating = controller.vatsim_data.requested_rating.into();
+
+    sqlx::query(
+        r#"
+        UPDATE controller_sessions
+        SET
+            last_seen = $2,
+            is_observer = $3,
+            name = $4,
+            user_rating = $5,
+            requested_rating = $6,
+            connected_callsign = $7,
+            primary_position_id = $8
+        WHERE id = $1
+        "#,
+    )
+    .bind(session_id)
+    .bind(seen_at)
+    .bind(controller.is_observer)
+    .bind(controller.vatsim_data.real_name.clone())
+    .bind(user_rating)
+    .bind(requested_rating)
+    .bind(controller.vatsim_data.callsign.clone())
+    .bind(controller.primary_position_id.clone())
+    .execute(executor)
+    .await
+    .map(|_| ())
+    .map_err(QueryError::from)
+}
+
+pub async fn complete_controller_sessions<'e, E>(
+    executor: E,
+    ids: &[Uuid],
+    ended_at: DateTime<Utc>,
+) -> Result<u64, QueryError>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    let result = sqlx::query(
+        r#"
+        UPDATE controller_sessions
+        SET
+            is_active = FALSE,
+            end_time = $2,
+            duration = $2 - start_time,
+            last_seen = $2
+        WHERE id = ANY($1)
+        "#,
+    )
+    .bind(ids)
+    .bind(ended_at)
+    .execute(executor)
+    .await
+    .map_err(QueryError::from)?;
+
+    Ok(result.rows_affected())
+}
+
+pub async fn get_active_callsign_sessions<'e, E>(
+    executor: E,
+) -> Result<Vec<CallsignSession>, QueryError>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    sqlx::query_as::<_, CallsignSession>(
+        r#"
+        SELECT id, prefix, suffix, start_time, end_time, duration, last_seen, is_active, created_at
+        FROM callsign_sessions
+        WHERE is_active = TRUE
+        "#,
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(QueryError::from)
+}
+
+pub async fn get_active_position_sessions<'e, E>(
+    executor: E,
+) -> Result<Vec<PositionSession>, QueryError>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    sqlx::query_as::<_, PositionSession>(
+        r#"
+        SELECT id, position_id, start_time, end_time, duration, last_seen, is_active, created_at
+        FROM position_sessions
+        WHERE is_active = TRUE
+        "#,
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(QueryError::from)
+}
+
+pub async fn get_or_create_callsign_session<E>(
+    executor: &mut E,
+    prefix: &str,
+    suffix: &str,
+    seen_at: DateTime<Utc>,
+) -> Result<Uuid, QueryError>
+where
+    for<'c> &'c mut E: Executor<'c, Database = Postgres>,
+{
+    let existing = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT id FROM callsign_sessions
+        WHERE is_active = TRUE AND prefix = $1 AND suffix = $2
+        FOR UPDATE
+        "#,
+    )
+    .bind(prefix)
+    .bind(suffix)
+    .fetch_optional(&mut *executor)
+    .await?;
+
+    if let Some(existing) = existing {
+        update_callsign_session_last_seen(&mut *executor, existing, seen_at).await?;
+        return Ok(existing);
+    }
+
+    let id = Uuid::now_v7();
+    sqlx::query(
+        r#"
+        INSERT INTO callsign_sessions (
+            id,
+            prefix,
+            suffix,
+            start_time,
+            end_time,
+            duration,
+            last_seen,
+            is_active,
+            created_at
+        )
+        VALUES ($1, $2, $3, $4, NULL, NULL, $4, TRUE, $4)
+        "#,
+    )
+    .bind(id)
+    .bind(prefix)
+    .bind(suffix)
+    .bind(seen_at)
+    .execute(&mut *executor)
+    .await
+    .map_err(QueryError::from)?;
+
+    Ok(id)
+}
+
+pub async fn update_callsign_session_last_seen<'e, E>(
+    executor: &mut E,
+    id: Uuid,
+    seen_at: DateTime<Utc>,
+) -> Result<(), QueryError>
+where
+    for<'c> &'c mut E: Executor<'c, Database = Postgres>,
+{
+    sqlx::query(
+        r#"
+        UPDATE callsign_sessions
+        SET last_seen = $2
+        WHERE id = $1
+        "#,
+    )
+    .bind(id)
+    .bind(seen_at)
+    .execute(&mut *executor)
+    .await
+    .map(|_| ())
+    .map_err(QueryError::from)
+}
+
+pub async fn complete_callsign_sessions<'e, E>(
+    executor: E,
+    ids: &[Uuid],
+    ended_at: DateTime<Utc>,
+) -> Result<u64, QueryError>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    let result = sqlx::query(
+        r#"
+        UPDATE callsign_sessions
+        SET
+            is_active = FALSE,
+            end_time = $2,
+            duration = $2 - start_time,
+            last_seen = $2
+        WHERE id = ANY($1)
+        "#,
+    )
+    .bind(ids)
+    .bind(ended_at)
+    .execute(executor)
+    .await
+    .map_err(QueryError::from)?;
+
+    Ok(result.rows_affected())
+}
+
+pub async fn get_or_create_position_session<E>(
+    executor: &mut E,
+    position_id: &str,
+    seen_at: DateTime<Utc>,
+) -> Result<Uuid, QueryError>
+where
+    for<'c> &'c mut E: Executor<'c, Database = Postgres>,
+{
+    let existing = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT id FROM position_sessions
+        WHERE is_active = TRUE AND position_id = $1
+        FOR UPDATE
+        "#,
+    )
+    .bind(position_id)
+    .fetch_optional(&mut *executor)
+    .await?;
+
+    if let Some(existing) = existing {
+        update_position_session_last_seen(&mut *executor, existing, seen_at).await?;
+        return Ok(existing);
+    }
+
+    let id = Uuid::now_v7();
+    sqlx::query(
+        r#"
+        INSERT INTO position_sessions (
+            id,
+            position_id,
+            start_time,
+            end_time,
+            duration,
+            last_seen,
+            is_active,
+            created_at
+        )
+        VALUES ($1, $2, $3, NULL, NULL, $3, TRUE, $3)
+        "#,
+    )
+    .bind(id)
+    .bind(position_id)
+    .bind(seen_at)
+    .execute(&mut *executor)
+    .await
+    .map_err(QueryError::from)?;
+
+    Ok(id)
+}
+
+pub async fn update_position_session_last_seen<'e, E>(
+    executor: &mut E,
+    id: Uuid,
+    seen_at: DateTime<Utc>,
+) -> Result<(), QueryError>
+where
+    for<'c> &'c mut E: Executor<'c, Database = Postgres>,
+{
+    sqlx::query(
+        r#"
+        UPDATE position_sessions
+        SET last_seen = $2
+        WHERE id = $1
+        "#,
+    )
+    .bind(id)
+    .bind(seen_at)
+    .execute(&mut *executor)
+    .await
+    .map(|_| ())
+    .map_err(QueryError::from)
+}
+
+pub async fn complete_position_sessions<'e, E>(
+    executor: E,
+    ids: &[Uuid],
+    ended_at: DateTime<Utc>,
+) -> Result<u64, QueryError>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    let result = sqlx::query(
+        r#"
+        UPDATE position_sessions
+        SET
+            is_active = FALSE,
+            end_time = $2,
+            duration = $2 - start_time,
+            last_seen = $2
+        WHERE id = ANY($1)
+        "#,
+    )
+    .bind(ids)
+    .bind(ended_at)
+    .execute(executor)
+    .await
+    .map_err(QueryError::from)?;
+
+    Ok(result.rows_affected())
 }
