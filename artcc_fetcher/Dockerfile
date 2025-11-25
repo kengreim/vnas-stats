@@ -17,7 +17,7 @@ RUN cargo build --release -p artcc_fetcher
 
 # Runtime image
 FROM debian:trixie-slim
-RUN apt-get update && apt install -y openssl && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt install -y openssl && apt-get install -y ca-certificates & apt-get install wget && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
 # Copy binary and migrations

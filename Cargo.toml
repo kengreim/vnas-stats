@@ -14,4 +14,5 @@ reqwest = { version = "0.12.24", features = ["json"] }
 sqlx = { version = "0.8.3", features = ["runtime-tokio", "tls-native-tls", "postgres", "migrate", "chrono", "uuid", "json"] }
 thiserror = "2.0.17"
 uuid = { version = "1.18.1", features = ["v7"] }
-zstd = "0.13.2"
+zstd = "0.13.3"
+axum = "0.8.7"

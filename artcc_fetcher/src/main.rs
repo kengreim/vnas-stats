@@ -1,5 +1,10 @@
 mod model;
 
+use axum::Router;
+use axum::extract::State;
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
+use axum::routing::get;
 use chrono::{DateTime, Utc};
 use model::{FlatFacility, FlatPosition};
 use reqwest::Client;
@@ -13,6 +18,12 @@ use sqlx::{Pool, Postgres, Row};
 use thiserror::Error;
 use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
+
+#[derive(Clone)]
+pub struct AxumState {
+    client: Client,
+    db_pool: Pool<Postgres>,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
@@ -30,13 +41,34 @@ async fn main() -> Result<(), AppError> {
     let db_pool = initialize_db(&config.postgres).await?;
     let client = Client::new();
 
-    let res = fetch_and_process(&client, &db_pool).await;
-    match res {
-        Ok(()) => info!("ARTCC data sync was successful"),
-        Err(ref e) => error!(error = ?e, "failed to sync ARTCC data"),
-    }
+    let app = Router::new()
+        .route("/health", get(health_check))
+        .route("/update", get(update_data))
+        .with_state(AxumState { client, db_pool });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
+        .await
+        .unwrap();
+    axum::serve(listener, app).await.unwrap();
 
-    res
+    Ok(())
+}
+
+async fn health_check() -> impl IntoResponse {
+    (StatusCode::OK, "Service is healthy!")
+}
+
+async fn update_data(State(state): State<AxumState>) -> impl IntoResponse {
+    let res = fetch_and_process(&state.client, &state.db_pool).await;
+    match res {
+        Ok(()) => {
+            info!("ARTCC data sync was successful");
+            (StatusCode::OK, "ARTCC data sync was successful".to_string())
+        }
+        Err(ref e) => {
+            error!(error = ?e, "failed to sync ARTCC data");
+            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+        }
+    }
 }
 
 async fn initialize_db(pg_config: &PostgresConfig) -> Result<Pool<Postgres>, AppError> {
