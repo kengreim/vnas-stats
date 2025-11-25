@@ -1,22 +1,21 @@
 FROM rust:1.91.1 AS builder
 WORKDIR /app
 
-# Pre-fetch dependencies with cached Cargo metadata
+# Pre-fetch dependencies with cached Cargo metadata. We need member manifests and source
+# trees so Cargo can discover targets.
 COPY Cargo.toml Cargo.lock ./
-COPY shared/Cargo.toml shared/
-COPY artcc_updater/Cargo.toml artcc_updater/
-RUN cargo fetch
-
-# Copy sources
+COPY datafeed_fetcher ./datafeed_fetcher
+COPY datafeed_processor ./datafeed_processor
 COPY shared ./shared
 COPY artcc_updater ./artcc_updater
+RUN cargo fetch
 
 # Build release binary
 RUN cargo build --release -p artcc_updater
 
 # Runtime image
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+FROM debian:trixie-slim
+RUN apt-get update && apt-get install -y ca-certificates && apt-get install -y openssl && apt-get install -y wget && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
 # Copy binary and migrations
