@@ -22,6 +22,6 @@ WORKDIR /app
 
 # Copy binary and migrations
 COPY --from=builder /app/target/release/artcc_fetcher /usr/local/bin/artcc_fetcher
-COPY artcc_fetcher/migrations ./migrations
+COPY --from=builder /app/artcc_fetcher/migrations ./migrations
 
 ENTRYPOINT ["artcc_fetcher"]
