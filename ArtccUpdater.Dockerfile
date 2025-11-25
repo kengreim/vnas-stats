@@ -17,5 +17,6 @@ RUN cargo build --release -p artcc_updater
 
 FROM debian:trixie-slim AS runtime
 WORKDIR /app
+RUN apt-get update && apt-get install -y ca-certificates && apt-get install -y openssl && apt-get install -y wget && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/artcc_updater /usr/local/bin
 ENTRYPOINT ["/usr/local/bin/artcc_updater"]
