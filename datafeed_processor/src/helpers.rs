@@ -2,15 +2,14 @@ use crate::database::queries::{
     QueryError, complete_callsign_sessions, complete_controller_sessions,
     complete_position_sessions, get_active_callsign_sessions, get_active_controller_session_keys,
     get_active_position_sessions, get_or_create_callsign_session, get_or_create_position_session,
-    insert_controller_session, update_active_controller_session, update_callsign_session_last_seen,
-    update_position_session_last_seen,
+    update_callsign_session_last_seen, update_position_session_last_seen,
 };
 use crate::error::{CallsignParseError, ControllerParseError};
 use chrono::{DateTime, Utc};
 use shared::vnas::datafeed::Controller;
 use sqlx::{Postgres, Transaction};
 use std::collections::{HashMap, HashSet};
-use tracing::{debug, trace};
+use tracing::debug;
 use uuid::Uuid;
 
 type Callsign<'a> = (&'a str, Option<&'a str>, &'a str);
@@ -26,8 +25,6 @@ pub struct ActiveControllerState {
 
 pub struct SessionMaps<'a> {
     pub active_by_cid: &'a mut HashMap<i32, ActiveControllerState>,
-    pub callsign_counts: &'a HashMap<Uuid, usize>,
-    pub position_counts: &'a HashMap<Uuid, usize>,
     pub active_callsign_sessions: &'a HashMap<(String, String), Uuid>,
     pub active_position_sessions: &'a HashMap<String, Uuid>,
 }
@@ -35,8 +32,6 @@ pub struct SessionMaps<'a> {
 pub struct SessionCollections<'a> {
     pub active_callsign_ids: &'a mut HashSet<Uuid>,
     pub active_position_ids: &'a mut HashSet<String>,
-    pub extra_close_callsign: &'a mut Vec<Uuid>,
-    pub extra_close_positions: &'a mut Vec<Uuid>,
     pub controllers_to_complete: &'a mut Vec<Uuid>,
 }
 
@@ -50,8 +45,6 @@ pub struct ParsedController<'a> {
 #[derive(Default)]
 pub struct ActiveState {
     pub active_by_cid: HashMap<i32, ActiveControllerState>,
-    pub callsign_counts: HashMap<Uuid, usize>,
-    pub position_counts: HashMap<Uuid, usize>,
     pub active_callsign_sessions: HashSet<Uuid>,
     pub active_callsign_sessions_map: HashMap<(String, String), Uuid>,
     pub active_position_sessions: HashMap<String, Uuid>,
@@ -104,19 +97,6 @@ pub async fn load_active_state(
         .map(|s| (s.position_id, s.id))
         .collect();
 
-    state.callsign_counts = active_controller_sessions
-        .iter()
-        .fold(HashMap::new(), |mut acc, s| {
-            *acc.entry(s.callsign_session_id).or_insert(0usize) += 1;
-            acc
-        });
-    state.position_counts = active_controller_sessions
-        .iter()
-        .fold(HashMap::new(), |mut acc, s| {
-            *acc.entry(s.position_session_id).or_insert(0usize) += 1;
-            acc
-        });
-
     Ok(state)
 }
 
@@ -146,6 +126,56 @@ pub fn parse_controller_parts(
     })
 }
 
+#[derive(Clone)]
+pub enum ControllerAction {
+    UpdateExisting {
+        session_id: Uuid,
+        controller: Controller,
+        callsign_session_id: Uuid,
+        position_session_id: Uuid,
+    },
+    CreateNew {
+        controller: Controller,
+        callsign_key: (String, String),
+        position_id: String,
+        cid: i32,
+    },
+}
+
+pub async fn ensure_callsign_session(
+    tx: &mut Transaction<'_, Postgres>,
+    active_callsign_sessions_map: &mut HashMap<(String, String), Uuid>,
+    callsign_key: &(String, String),
+    seen_at: DateTime<Utc>,
+) -> Result<Uuid, QueryError> {
+    if let Some(id) = active_callsign_sessions_map.get(callsign_key).copied() {
+        update_callsign_session_last_seen(tx.as_mut(), id, seen_at).await?;
+        return Ok(id);
+    }
+
+    let id =
+        get_or_create_callsign_session(tx.as_mut(), &callsign_key.0, &callsign_key.1, seen_at)
+            .await?;
+    active_callsign_sessions_map.insert(callsign_key.clone(), id);
+    Ok(id)
+}
+
+pub async fn ensure_position_session(
+    tx: &mut Transaction<'_, Postgres>,
+    active_position_sessions: &mut HashMap<String, Uuid>,
+    position_id: &str,
+    seen_at: DateTime<Utc>,
+) -> Result<Uuid, QueryError> {
+    if let Some(id) = active_position_sessions.get(position_id).copied() {
+        update_position_session_last_seen(tx.as_mut(), id, seen_at).await?;
+        return Ok(id);
+    }
+
+    let id = get_or_create_position_session(tx.as_mut(), position_id, seen_at).await?;
+    active_position_sessions.insert(position_id.to_string(), id);
+    Ok(id)
+}
+
 pub async fn finalize_controller_sessions(
     tx: &mut Transaction<'_, Postgres>,
     active_by_cid: &HashMap<i32, ActiveControllerState>,
@@ -163,178 +193,6 @@ pub async fn finalize_controller_sessions(
     }
 
     complete_controller_sessions(tx.as_mut(), controllers_to_complete, ended_at).await
-}
-
-pub async fn handle_active_controller(
-    tx: &mut Transaction<'_, Postgres>,
-    controller: &Controller,
-    cid: i32,
-    prefix: &str,
-    suffix: &str,
-    position_id: &str,
-    updated_at: DateTime<Utc>,
-    maps: SessionMaps<'_>,
-    collections: SessionCollections<'_>,
-) -> Result<(), QueryError> {
-    let conn = tx.as_mut();
-    let SessionMaps {
-        active_by_cid,
-        callsign_counts,
-        position_counts,
-        active_callsign_sessions,
-        active_position_sessions,
-    } = maps;
-    let SessionCollections {
-        active_callsign_ids,
-        active_position_ids,
-        extra_close_callsign,
-        extra_close_positions,
-        controllers_to_complete,
-    } = collections;
-
-    if let Some(existing) = active_by_cid.remove(&cid) {
-        trace!(cid = cid, "found existing session for cid");
-        if existing.login_time == controller.login_time && existing.position_id == position_id {
-            trace!(
-                position_id = position_id,
-                "position ID and login_time match existing values, updating last seen times"
-            );
-            update_callsign_session_last_seen(conn, existing.callsign_session_id, updated_at)
-                .await?;
-            update_position_session_last_seen(conn, existing.position_session_id, updated_at)
-                .await?;
-            update_active_controller_session(
-                conn,
-                existing.controller_session_id,
-                controller,
-                updated_at,
-            )
-            .await?;
-            active_callsign_ids.insert(existing.callsign_session_id);
-            active_position_ids.insert(existing.position_id);
-        } else {
-            trace!(
-                current_position_id = position_id,
-                existing_position_id = existing.position_id,
-                current_login_time = ?controller.login_time,
-                existing_login_time = ?existing.login_time,
-                "one of position ID or login_time does not match existing values, closing existing controller session and starting new"
-            );
-            controllers_to_complete.push(existing.controller_session_id);
-
-            let callsign_count = callsign_counts
-                .get(&existing.callsign_session_id)
-                .copied()
-                .unwrap_or(0);
-            let new_callsign_session_id = if callsign_count <= 1 {
-                trace!(
-                    prefix = prefix,
-                    suffix = suffix,
-                    callsign_session_id = %existing.callsign_session_id,
-                    "1 or fewer controllers on this callsign, closing existing callsign session and creating new"
-                );
-                extra_close_callsign.push(existing.callsign_session_id);
-                get_or_create_callsign_session(conn, prefix, suffix, updated_at).await?
-            } else {
-                trace!(
-                    prefix = prefix,
-                    suffix = suffix,
-                    callsign_session_id = %existing.callsign_session_id,
-                    "other controllers still on this callsign, keeping this callsign session alive"
-                );
-                update_callsign_session_last_seen(conn, existing.callsign_session_id, updated_at)
-                    .await?;
-                existing.callsign_session_id
-            };
-            active_callsign_ids.insert(new_callsign_session_id);
-
-            let position_count = position_counts
-                .get(&existing.position_session_id)
-                .copied()
-                .unwrap_or(0);
-            let new_position_session_id = if position_count <= 1 {
-                trace!(
-                    position_id = position_id,
-                    position_session_id = %existing.callsign_session_id,
-                    "1 or fewer controllers on this position, closing existing position session and creating new"
-                );
-                extra_close_positions.push(existing.position_session_id);
-                get_or_create_position_session(conn, position_id, updated_at).await?
-            } else {
-                trace!(
-                    position_id = position_id,
-                    position_session_id = %existing.callsign_session_id,
-                    "other controllers still on this position, keeping this position session alive"
-                );
-                update_position_session_last_seen(conn, existing.position_session_id, updated_at)
-                    .await?;
-                existing.position_session_id
-            };
-            active_position_ids.insert(position_id.to_string());
-
-            insert_controller_session(
-                conn,
-                controller,
-                cid,
-                updated_at,
-                new_callsign_session_id,
-                new_position_session_id,
-            )
-            .await?;
-        }
-    } else {
-        trace!(cid = cid, "found a new controller by cid");
-        let callsign_key = (prefix.to_string(), suffix.to_string());
-        let callsign_session_id =
-            if let Some(id) = active_callsign_sessions.get(&callsign_key).copied() {
-                trace!(
-                    prefix = prefix,
-                    suffix = suffix,
-                    id = %id,
-                    "found an already existing callsign session"
-                );
-                update_callsign_session_last_seen(conn, id, updated_at).await?;
-                id
-            } else {
-                trace!(
-                    prefix = prefix,
-                    suffix = suffix,
-                    "creating a new callsign session"
-                );
-                get_or_create_callsign_session(conn, prefix, suffix, updated_at).await?
-            };
-        active_callsign_ids.insert(callsign_session_id);
-
-        let position_session_id =
-            if let Some(id) = active_position_sessions.get(position_id).copied() {
-                trace!(
-                    position_id = %position_id,
-                    position_session_id = %id,
-                    "found an already existing position session"
-                );
-                update_position_session_last_seen(conn, id, updated_at).await?;
-                id
-            } else {
-                trace!(
-                    position_id = %position_id,
-                    "creating a new position session"
-                );
-                get_or_create_position_session(conn, position_id, updated_at).await?
-            };
-        active_position_ids.insert(position_id.to_string());
-
-        insert_controller_session(
-            conn,
-            controller,
-            cid,
-            updated_at,
-            callsign_session_id,
-            position_session_id,
-        )
-        .await?;
-    }
-
-    Ok(())
 }
 
 pub async fn finalize_callsign_sessions(
