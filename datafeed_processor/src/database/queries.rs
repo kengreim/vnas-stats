@@ -48,7 +48,7 @@ where
     .map_err(QueryError::from)
 }
 
-pub async fn archive_datafeed<'e, E>(
+async fn archive_datafeed<'e, E>(
     executor: E,
     message: &QueuedDatafeed,
     processed_at: DateTime<Utc>,
@@ -87,7 +87,7 @@ where
     Ok(())
 }
 
-pub async fn delete_queued_datafeed<'e, E>(executor: E, id: Uuid) -> Result<(), QueryError>
+async fn delete_queued_datafeed<'e, E>(executor: E, id: Uuid) -> Result<(), QueryError>
 where
     E: Executor<'e, Database = Postgres>,
 {
@@ -97,6 +97,19 @@ where
         .await
         .map(|_| ())
         .map_err(QueryError::from)
+}
+
+pub async fn archive_and_delete_datafeed<'e, E>(
+    executor: &mut E,
+    message: &QueuedDatafeed,
+    processed_at: DateTime<Utc>,
+) -> Result<(), QueryError>
+where
+    for<'c> &'c mut E: Executor<'c, Database = Postgres>,
+{
+    archive_datafeed(&mut *executor, message, processed_at).await?;
+    delete_queued_datafeed(&mut *executor, message.id).await?;
+    Ok(())
 }
 
 pub async fn get_active_controller_session_keys<'e, E>(
