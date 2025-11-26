@@ -4,14 +4,14 @@ mod helpers;
 
 use crate::database::queries::{
     archive_and_delete_datafeed, complete_controller_sessions, fetch_datafeed_batch,
-    insert_controller_session, update_active_controller_session,
-    update_callsign_session_last_seen, update_position_session_last_seen,
+    insert_controller_session, update_active_controller_session, update_callsign_session_last_seen,
+    update_position_session_last_seen,
 };
 use crate::error::{BacklogProcessingError, PayloadProcessingError, ProcessorError};
 use crate::helpers::{
-    ensure_callsign_session, ensure_position_session, finalize_callsign_sessions,
-    finalize_position_sessions, load_active_state, parse_controller_parts, ActiveState,
-    ControllerAction, ParsedController,
+    ActiveState, ControllerAction, ParsedController, ensure_callsign_session,
+    ensure_position_session, finalize_callsign_sessions, finalize_position_sessions,
+    load_active_state, parse_controller_parts,
 };
 use chrono::Utc;
 use shared::PostgresConfig;
@@ -22,7 +22,7 @@ use sqlx::postgres::{PgListener, PgPoolOptions};
 use sqlx::{Pool, Postgres};
 use std::collections::HashSet;
 use tokio::time::{Duration, sleep};
-use tracing::{debug, info, trace, warn};
+use tracing::{Level, debug, event_enabled, info, trace, warn};
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
@@ -83,7 +83,7 @@ async fn initialize_db(pg_config: &PostgresConfig) -> Result<Pool<Postgres>, Ini
         .connect(&pg_config.connection_string)
         .await?;
 
-    sqlx::migrate!("./migrations").run(&pool).await?;
+    sqlx::migrate!("../migrations").run(&pool).await?;
 
     Ok(pool)
 }
@@ -131,18 +131,19 @@ async fn process_datafeed_payload(
 ) -> Result<(), PayloadProcessingError> {
     let mut tx = pool.begin().await?;
 
-    let mut active_state = load_active_state(&mut tx).await?;
+    let mut existing_state = load_active_state(&mut tx).await?;
     let ActiveState {
-        active_by_cid,
-        active_callsign_sessions,
-        active_callsign_sessions_map,
-        active_position_sessions,
-    } = &mut active_state;
+        active_by_cid: existing_active_by_cid,
+        active_callsign_sessions: existing_active_callsign_sessions,
+        active_callsign_sessions_map: existing_active_callsign_sessions_map,
+        active_position_sessions: existing_active_position_sessions,
+    } = &mut existing_state;
     let mut active_callsign_ids: HashSet<Uuid> = HashSet::new();
     let mut active_position_ids: HashSet<String> = HashSet::new();
-    let mut controllers_to_complete: Vec<Uuid> = Vec::new();
     let mut controller_actions: Vec<ControllerAction> = Vec::new();
 
+    // First pass: only handle Controller-Position Sessions (i.e., a session with the unique combination
+    // of a CID, primary position ID and loging time)
     for controller in datafeed.controllers {
         let ParsedController {
             cid,
@@ -170,8 +171,13 @@ async fn process_datafeed_payload(
                 position_id = position_id,
                 "controller in datafeed is active, starting processing"
             );
-            if let Some(existing) = active_by_cid.remove(&cid) {
-                if existing.login_time == controller.login_time && existing.position_id == position_id {
+            if let Some(existing) = existing_active_by_cid.remove(&cid) {
+                if existing.login_time == controller.login_time
+                    && existing.position_id == position_id
+                {
+                    trace!(
+                        "controller was previously tracked and has same login time, position_id and callsign"
+                    );
                     controller_actions.push(ControllerAction::UpdateExisting {
                         session_id: existing.controller_session_id,
                         controller: controller.clone(),
@@ -181,7 +187,16 @@ async fn process_datafeed_payload(
                     active_callsign_ids.insert(existing.callsign_session_id);
                     active_position_ids.insert(existing.position_id);
                 } else {
-                    controllers_to_complete.push(existing.controller_session_id);
+                    trace!(
+                        current_position_id = position_id,
+                        existing_position_id = existing.position_id,
+                        current_login_time = ?controller.login_time,
+                        existing_login_time = ?existing.login_time,
+                        "one of position ID or login_time does not match existing values, closing existing controller session and starting new"
+                    );
+                    controller_actions.push(ControllerAction::Close {
+                        session_id: existing.controller_session_id,
+                    });
                     controller_actions.push(ControllerAction::CreateNew {
                         controller: controller.clone(),
                         callsign_key: (prefix.to_string(), suffix.to_string()),
@@ -190,6 +205,7 @@ async fn process_datafeed_payload(
                     });
                 }
             } else {
+                trace!("controller was not previously tracked, creating new session");
                 controller_actions.push(ControllerAction::CreateNew {
                     controller: controller.clone(),
                     callsign_key: (prefix.to_string(), suffix.to_string()),
@@ -197,27 +213,36 @@ async fn process_datafeed_payload(
                     cid,
                 });
             }
-        } else if let Some(existing) = active_by_cid.remove(&cid) {
+        } else if let Some(existing) = existing_active_by_cid.remove(&cid) {
             trace!(
                 cid = cid,
                 prefix = prefix,
                 suffix = suffix,
                 position_id = position_id,
                 exisiting_controller_session_id = %existing.controller_session_id,
-                "controller in datafeed is no longer active, storing controller_session_id to close"
+                "tracked controller is still in the datafeed but no longer active, closing session"
             );
-            controllers_to_complete.push(existing.controller_session_id);
+            controller_actions.push(ControllerAction::Close {
+                session_id: existing.controller_session_id,
+            });
         }
     }
 
-    controllers_to_complete.extend(
-        active_by_cid
-            .values()
-            .map(|state| state.controller_session_id),
-    );
+    let remaining_to_close = existing_active_by_cid.values().collect::<Vec<_>>();
+    if event_enabled!(Level::TRACE) {
+        for missing in &remaining_to_close {
+            trace!(controller = ?missing, "previously tracked controller no longer seen in datafeed");
+        }
+    }
+    controller_actions.extend(remaining_to_close.into_iter().map(|state| {
+        ControllerAction::Close {
+            session_id: state.controller_session_id,
+        }
+    }));
 
     // Second pass: resolve callsign/position sessions and apply controller changes
-    for action in controller_actions {
+    let mut close_controller_session_ids: Vec<Uuid> = Vec::new();
+    for action in &controller_actions {
         match action {
             ControllerAction::UpdateExisting {
                 session_id,
@@ -225,22 +250,26 @@ async fn process_datafeed_payload(
                 callsign_session_id,
                 position_session_id,
             } => {
-                update_callsign_session_last_seen(tx.as_mut(), callsign_session_id, datafeed.updated_at)
-                    .await?;
+                update_callsign_session_last_seen(
+                    tx.as_mut(),
+                    *callsign_session_id,
+                    datafeed.updated_at,
+                )
+                .await?;
                 update_position_session_last_seen(
                     tx.as_mut(),
-                    position_session_id,
+                    *position_session_id,
                     datafeed.updated_at,
                 )
                 .await?;
                 update_active_controller_session(
                     tx.as_mut(),
-                    session_id,
+                    *session_id,
                     &controller,
                     datafeed.updated_at,
                 )
                 .await?;
-                active_callsign_ids.insert(callsign_session_id);
+                active_callsign_ids.insert(*callsign_session_id);
                 active_position_ids.insert(controller.primary_position_id.clone());
             }
             ControllerAction::CreateNew {
@@ -251,14 +280,14 @@ async fn process_datafeed_payload(
             } => {
                 let callsign_session_id = ensure_callsign_session(
                     &mut tx,
-                    active_callsign_sessions_map,
+                    existing_active_callsign_sessions_map,
                     &callsign_key,
                     datafeed.updated_at,
                 )
                 .await?;
                 let position_session_id = ensure_position_session(
                     &mut tx,
-                    active_position_sessions,
+                    existing_active_position_sessions,
                     &position_id,
                     datafeed.updated_at,
                 )
@@ -266,42 +295,42 @@ async fn process_datafeed_payload(
                 insert_controller_session(
                     tx.as_mut(),
                     &controller,
-                    cid,
+                    *cid,
                     datafeed.updated_at,
                     callsign_session_id,
                     position_session_id,
                 )
                 .await?;
                 active_callsign_ids.insert(callsign_session_id);
-                active_position_ids.insert(position_id);
+                active_position_ids.insert(position_id.to_string());
+            }
+            ControllerAction::Close { session_id } => {
+                close_controller_session_ids.push(*session_id);
             }
         }
     }
 
-    let closed = if controllers_to_complete.is_empty() {
-        0
-    } else {
-        complete_controller_sessions(&mut *tx, &controllers_to_complete, datafeed.updated_at)
-            .await?
-    };
-    if closed > 0 {
-        debug!(closed_sessions = closed, "marked sessions as completed");
+    if !close_controller_session_ids.is_empty() {
+        let _ = complete_controller_sessions(
+            &mut *tx,
+            &close_controller_session_ids,
+            datafeed.updated_at,
+        )
+        .await?;
     }
 
     finalize_callsign_sessions(
         &mut tx,
-        active_callsign_sessions,
+        existing_active_callsign_sessions,
         &active_callsign_ids,
-        Vec::new(),
         datafeed.updated_at,
     )
     .await?;
 
     finalize_position_sessions(
         &mut tx,
-        active_position_sessions,
+        existing_active_position_sessions,
         &active_position_ids,
-        Vec::new(),
         datafeed.updated_at,
     )
     .await?;

@@ -1,7 +1,7 @@
 use crate::database::queries::{
-    QueryError, complete_callsign_sessions, complete_controller_sessions,
-    complete_position_sessions, get_active_callsign_sessions, get_active_controller_session_keys,
-    get_active_position_sessions, get_or_create_callsign_session, get_or_create_position_session,
+    QueryError, complete_callsign_sessions, complete_position_sessions,
+    get_active_callsign_sessions, get_active_controller_session_keys, get_active_position_sessions,
+    get_or_create_callsign_session, get_or_create_position_session,
     update_callsign_session_last_seen, update_position_session_last_seen,
 };
 use crate::error::{CallsignParseError, ControllerParseError};
@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use shared::vnas::datafeed::Controller;
 use sqlx::{Postgres, Transaction};
 use std::collections::{HashMap, HashSet};
-use tracing::debug;
+use tracing::{Level, debug, event_enabled, trace};
 use uuid::Uuid;
 
 type Callsign<'a> = (&'a str, Option<&'a str>, &'a str);
@@ -21,18 +21,6 @@ pub struct ActiveControllerState {
     pub callsign_session_id: Uuid,
     pub position_id: String,
     pub position_session_id: Uuid,
-}
-
-pub struct SessionMaps<'a> {
-    pub active_by_cid: &'a mut HashMap<i32, ActiveControllerState>,
-    pub active_callsign_sessions: &'a HashMap<(String, String), Uuid>,
-    pub active_position_sessions: &'a HashMap<String, Uuid>,
-}
-
-pub struct SessionCollections<'a> {
-    pub active_callsign_ids: &'a mut HashSet<Uuid>,
-    pub active_position_ids: &'a mut HashSet<String>,
-    pub controllers_to_complete: &'a mut Vec<Uuid>,
 }
 
 pub struct ParsedController<'a> {
@@ -140,6 +128,9 @@ pub enum ControllerAction {
         position_id: String,
         cid: i32,
     },
+    Close {
+        session_id: Uuid,
+    },
 }
 
 pub async fn ensure_callsign_session(
@@ -153,9 +144,8 @@ pub async fn ensure_callsign_session(
         return Ok(id);
     }
 
-    let id =
-        get_or_create_callsign_session(tx.as_mut(), &callsign_key.0, &callsign_key.1, seen_at)
-            .await?;
+    let id = get_or_create_callsign_session(tx.as_mut(), &callsign_key.0, &callsign_key.1, seen_at)
+        .await?;
     active_callsign_sessions_map.insert(callsign_key.clone(), id);
     Ok(id)
 }
@@ -175,45 +165,46 @@ pub async fn ensure_position_session(
     active_position_sessions.insert(position_id.to_string(), id);
     Ok(id)
 }
-
-pub async fn finalize_controller_sessions(
-    tx: &mut Transaction<'_, Postgres>,
-    active_by_cid: &HashMap<i32, ActiveControllerState>,
-    controllers_to_complete: &mut Vec<Uuid>,
-    ended_at: DateTime<Utc>,
-) -> Result<u64, QueryError> {
-    controllers_to_complete.extend(
-        active_by_cid
-            .values()
-            .map(|state| state.controller_session_id),
-    );
-
-    if controllers_to_complete.is_empty() {
-        return Ok(0);
-    }
-
-    complete_controller_sessions(tx.as_mut(), controllers_to_complete, ended_at).await
-}
+//
+// pub async fn finalize_controller_sessions(
+//     tx: &mut Transaction<'_, Postgres>,
+//     active_by_cid: &HashMap<i32, ActiveControllerState>,
+//     controllers_to_complete: &mut Vec<Uuid>,
+//     ended_at: DateTime<Utc>,
+// ) -> Result<u64, QueryError> {
+//     controllers_to_complete.extend(
+//         active_by_cid
+//             .values()
+//             .map(|state| state.controller_session_id),
+//     );
+//
+//     if controllers_to_complete.is_empty() {
+//         return Ok(0);
+//     }
+//
+//     complete_controller_sessions(tx.as_mut(), controllers_to_complete, ended_at).await
+// }
 
 pub async fn finalize_callsign_sessions(
     tx: &mut Transaction<'_, Postgres>,
     active_callsign_sessions: &HashSet<Uuid>,
     active_callsign_ids: &HashSet<Uuid>,
-    mut extra_close_callsign: Vec<Uuid>,
     ended_at: DateTime<Utc>,
 ) -> Result<(), QueryError> {
     let conn = tx.as_mut();
-    let mut to_close_callsign: Vec<Uuid> = active_callsign_sessions
+    let to_close_callsign: Vec<Uuid> = active_callsign_sessions
         .difference(active_callsign_ids)
         .cloned()
         .collect();
-    to_close_callsign.append(&mut extra_close_callsign);
+
+    if event_enabled!(Level::TRACE) {
+        for callsign_id in &to_close_callsign {
+            trace!(id = %callsign_id, "closing callsign session");
+        }
+    }
+
     if !to_close_callsign.is_empty() {
         complete_callsign_sessions(conn, &to_close_callsign, ended_at).await?;
-        debug!(
-            closed_callsign_sessions = to_close_callsign.len(),
-            "marked callsign sessions as completed"
-        );
     }
     Ok(())
 }
@@ -222,11 +213,10 @@ pub async fn finalize_position_sessions(
     tx: &mut Transaction<'_, Postgres>,
     active_position_sessions: &HashMap<String, Uuid>,
     active_position_ids: &HashSet<String>,
-    mut extra_close_positions: Vec<Uuid>,
     ended_at: DateTime<Utc>,
 ) -> Result<(), QueryError> {
     let conn = tx.as_mut();
-    let mut to_close_positions: Vec<Uuid> = active_position_sessions
+    let to_close_positions: Vec<Uuid> = active_position_sessions
         .iter()
         .filter_map(|(pos_id, session_id)| {
             if active_position_ids.contains(pos_id) {
@@ -236,13 +226,15 @@ pub async fn finalize_position_sessions(
             }
         })
         .collect();
-    to_close_positions.append(&mut extra_close_positions);
+
+    if event_enabled!(Level::TRACE) {
+        for position_session_id in &to_close_positions {
+            trace!(id = %position_session_id, "closing position session");
+        }
+    }
+
     if !to_close_positions.is_empty() {
         complete_position_sessions(conn, &to_close_positions, ended_at).await?;
-        debug!(
-            closed_position_sessions = to_close_positions.len(),
-            "marked position sessions as completed"
-        );
     }
     Ok(())
 }

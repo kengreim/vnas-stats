@@ -77,7 +77,7 @@ async fn initialize_db(pg_config: &PostgresConfig) -> Result<Pool<Postgres>, App
         .connect(&pg_config.connection_string)
         .await?;
 
-    sqlx::migrate!("./migrations").run(&pool).await?;
+    sqlx::migrate!("../migrations").run(&pool).await?;
 
     Ok(pool)
 }

@@ -86,7 +86,7 @@ async fn initialize_db(pg_config: &PostgresConfig) -> Result<Pool<Postgres>, Ini
         .await?;
 
     // Run any new migrations
-    sqlx::migrate!("../datafeed_processor/migrations")
+    sqlx::migrate!("../migrations")
         .run(&pool)
         .await?;
 
@@ -134,9 +134,9 @@ async fn enqueue_datafeed(
     .await?;
 
     // Notify listeners that a new datafeed is available.
-    sqlx::query_scalar::<_, String>("SELECT pg_notify('datafeed_queue', $1)")
+    sqlx::query("SELECT pg_notify('datafeed_queue', $1)")
         .bind(id.to_string())
-        .fetch_one(&mut *tx)
+        .execute(&mut *tx)
         .await?;
 
     tx.commit().await?;
