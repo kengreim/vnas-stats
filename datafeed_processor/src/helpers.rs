@@ -1,16 +1,19 @@
 use crate::database::queries::{
-    QueryError, complete_callsign_sessions, complete_position_sessions,
-    get_active_callsign_sessions, get_active_controller_session_keys, get_active_position_sessions,
-    get_or_create_callsign_session, get_or_create_position_session, insert_controller_session,
-    update_active_controller_session, update_callsign_session_last_seen,
+    QueryError, complete_callsign_sessions, complete_controller_sessions,
+    complete_position_sessions, get_active_callsign_sessions, get_active_controller_session_keys,
+    get_active_position_sessions, get_or_create_callsign_session, get_or_create_position_session,
+    insert_controller_session, update_active_controller_session, update_callsign_session_last_seen,
     update_position_session_last_seen,
 };
+use crate::error::{CallsignParseError, ControllerParseError};
 use chrono::{DateTime, Utc};
 use shared::vnas::datafeed::Controller;
 use sqlx::{Postgres, Transaction};
 use std::collections::{HashMap, HashSet};
-use tracing::debug;
+use tracing::{debug, trace};
 use uuid::Uuid;
+
+type Callsign<'a> = (&'a str, Option<&'a str>, &'a str);
 
 #[derive(Debug, Clone)]
 pub struct ActiveControllerState {
@@ -25,6 +28,7 @@ pub struct SessionMaps<'a> {
     pub active_by_cid: &'a mut HashMap<i32, ActiveControllerState>,
     pub callsign_counts: &'a HashMap<Uuid, usize>,
     pub position_counts: &'a HashMap<Uuid, usize>,
+    pub active_callsign_sessions: &'a HashMap<(String, String), Uuid>,
     pub active_position_sessions: &'a HashMap<String, Uuid>,
 }
 
@@ -36,13 +40,31 @@ pub struct SessionCollections<'a> {
     pub controllers_to_complete: &'a mut Vec<Uuid>,
 }
 
+pub struct ParsedController<'a> {
+    pub cid: i32,
+    pub prefix: &'a str,
+    pub suffix: &'a str,
+    pub position_id: String,
+}
+
 #[derive(Default)]
 pub struct ActiveState {
     pub active_by_cid: HashMap<i32, ActiveControllerState>,
     pub callsign_counts: HashMap<Uuid, usize>,
     pub position_counts: HashMap<Uuid, usize>,
     pub active_callsign_sessions: HashSet<Uuid>,
+    pub active_callsign_sessions_map: HashMap<(String, String), Uuid>,
     pub active_position_sessions: HashMap<String, Uuid>,
+}
+
+fn parse_callsign(callsign: &str) -> Result<Callsign<'_>, CallsignParseError> {
+    let parts: Vec<&str> = callsign.split('_').collect();
+    // Direct indexing below is safe because we have already checked the length
+    match parts.len() {
+        2 => Ok((parts[0], None, parts[1])),
+        3 => Ok((parts[0], Some(parts[1]), parts[2])),
+        other => Err(CallsignParseError::IncorrectFormat(other)),
+    }
 }
 
 pub async fn load_active_state(
@@ -69,7 +91,12 @@ pub async fn load_active_state(
     state.active_callsign_sessions = get_active_callsign_sessions(&mut *conn)
         .await?
         .into_iter()
-        .map(|s| s.id)
+        .map(|s| {
+            state
+                .active_callsign_sessions_map
+                .insert((s.prefix.clone(), s.suffix.clone()), s.id);
+            s.id
+        })
         .collect();
     state.active_position_sessions = get_active_position_sessions(&mut *conn)
         .await?
@@ -93,6 +120,51 @@ pub async fn load_active_state(
     Ok(state)
 }
 
+pub fn parse_controller_parts(
+    controller: &Controller,
+) -> Result<ParsedController<'_>, ControllerParseError> {
+    let cid_str = controller.vatsim_data.cid.clone();
+    let cid: i32 = cid_str
+        .parse()
+        .map_err(|source| ControllerParseError::Cid {
+            cid: cid_str,
+            source,
+        })?;
+
+    let (prefix, _infix, suffix) =
+        parse_callsign(&controller.vatsim_data.callsign).map_err(|source| {
+            ControllerParseError::Callsign {
+                callsign: controller.vatsim_data.callsign.clone(),
+                source,
+            }
+        })?;
+    Ok(ParsedController {
+        cid,
+        prefix,
+        suffix,
+        position_id: controller.primary_position_id.clone(),
+    })
+}
+
+pub async fn finalize_controller_sessions(
+    tx: &mut Transaction<'_, Postgres>,
+    active_by_cid: &HashMap<i32, ActiveControllerState>,
+    controllers_to_complete: &mut Vec<Uuid>,
+    ended_at: DateTime<Utc>,
+) -> Result<u64, QueryError> {
+    controllers_to_complete.extend(
+        active_by_cid
+            .values()
+            .map(|state| state.controller_session_id),
+    );
+
+    if controllers_to_complete.is_empty() {
+        return Ok(0);
+    }
+
+    complete_controller_sessions(tx.as_mut(), controllers_to_complete, ended_at).await
+}
+
 pub async fn handle_active_controller(
     tx: &mut Transaction<'_, Postgres>,
     controller: &Controller,
@@ -109,6 +181,7 @@ pub async fn handle_active_controller(
         active_by_cid,
         callsign_counts,
         position_counts,
+        active_callsign_sessions,
         active_position_sessions,
     } = maps;
     let SessionCollections {
@@ -120,7 +193,12 @@ pub async fn handle_active_controller(
     } = collections;
 
     if let Some(existing) = active_by_cid.remove(&cid) {
+        trace!(cid = cid, "found existing session for cid");
         if existing.login_time == controller.login_time && existing.position_id == position_id {
+            trace!(
+                position_id = position_id,
+                "position ID and login_time match existing values, updating last seen times"
+            );
             update_callsign_session_last_seen(conn, existing.callsign_session_id, updated_at)
                 .await?;
             update_position_session_last_seen(conn, existing.position_session_id, updated_at)
@@ -135,15 +213,35 @@ pub async fn handle_active_controller(
             active_callsign_ids.insert(existing.callsign_session_id);
             active_position_ids.insert(existing.position_id);
         } else {
+            trace!(
+                current_position_id = position_id,
+                existing_position_id = existing.position_id,
+                current_login_time = ?controller.login_time,
+                existing_login_time = ?existing.login_time,
+                "one of position ID or login_time does not match existing values, closing existing controller session and starting new"
+            );
             controllers_to_complete.push(existing.controller_session_id);
+
             let callsign_count = callsign_counts
                 .get(&existing.callsign_session_id)
                 .copied()
                 .unwrap_or(0);
             let new_callsign_session_id = if callsign_count <= 1 {
+                trace!(
+                    prefix = prefix,
+                    suffix = suffix,
+                    callsign_session_id = %existing.callsign_session_id,
+                    "1 or fewer controllers on this callsign, closing existing callsign session and creating new"
+                );
                 extra_close_callsign.push(existing.callsign_session_id);
                 get_or_create_callsign_session(conn, prefix, suffix, updated_at).await?
             } else {
+                trace!(
+                    prefix = prefix,
+                    suffix = suffix,
+                    callsign_session_id = %existing.callsign_session_id,
+                    "other controllers still on this callsign, keeping this callsign session alive"
+                );
                 update_callsign_session_last_seen(conn, existing.callsign_session_id, updated_at)
                     .await?;
                 existing.callsign_session_id
@@ -155,14 +253,25 @@ pub async fn handle_active_controller(
                 .copied()
                 .unwrap_or(0);
             let new_position_session_id = if position_count <= 1 {
+                trace!(
+                    position_id = position_id,
+                    position_session_id = %existing.callsign_session_id,
+                    "1 or fewer controllers on this position, closing existing position session and creating new"
+                );
                 extra_close_positions.push(existing.position_session_id);
                 get_or_create_position_session(conn, position_id, updated_at).await?
             } else {
+                trace!(
+                    position_id = position_id,
+                    position_session_id = %existing.callsign_session_id,
+                    "other controllers still on this position, keeping this position session alive"
+                );
                 update_position_session_last_seen(conn, existing.position_session_id, updated_at)
                     .await?;
                 existing.position_session_id
             };
             active_position_ids.insert(position_id.to_string());
+
             insert_controller_session(
                 conn,
                 controller,
@@ -174,17 +283,46 @@ pub async fn handle_active_controller(
             .await?;
         }
     } else {
+        trace!(cid = cid, "found a new controller by cid");
+        let callsign_key = (prefix.to_string(), suffix.to_string());
         let callsign_session_id =
-            get_or_create_callsign_session(conn, prefix, suffix, updated_at).await?;
+            if let Some(id) = active_callsign_sessions.get(&callsign_key).copied() {
+                trace!(
+                    prefix = prefix,
+                    suffix = suffix,
+                    id = %id,
+                    "found an already existing callsign session"
+                );
+                update_callsign_session_last_seen(conn, id, updated_at).await?;
+                id
+            } else {
+                trace!(
+                    prefix = prefix,
+                    suffix = suffix,
+                    "creating a new callsign session"
+                );
+                get_or_create_callsign_session(conn, prefix, suffix, updated_at).await?
+            };
         active_callsign_ids.insert(callsign_session_id);
+
         let position_session_id =
             if let Some(id) = active_position_sessions.get(position_id).copied() {
+                trace!(
+                    position_id = %position_id,
+                    position_session_id = %id,
+                    "found an already existing position session"
+                );
                 update_position_session_last_seen(conn, id, updated_at).await?;
                 id
             } else {
+                trace!(
+                    position_id = %position_id,
+                    "creating a new position session"
+                );
                 get_or_create_position_session(conn, position_id, updated_at).await?
             };
         active_position_ids.insert(position_id.to_string());
+
         insert_controller_session(
             conn,
             controller,

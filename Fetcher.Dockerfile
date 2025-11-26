@@ -1,27 +1,22 @@
-FROM rust:1.91.1 AS builder
+FROM lukemathwalker/cargo-chef:latest-rust-1 AS chef
 WORKDIR /app
 
-# Pre-fetch dependencies using manifest files for cache efficiency
-COPY Cargo.toml Cargo.lock ./
-COPY shared/Cargo.toml shared/
-COPY datafeed_fetcher/Cargo.toml datafeed_fetcher/
-RUN cargo fetch
+FROM chef AS planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json --bin datafeed_fetcher
 
-# Copy sources
-COPY shared ./shared
-COPY datafeed_fetcher ./datafeed_fetcher
-COPY Settings.toml ./Settings.toml
+FROM chef AS builder
+COPY --from=planner /app/recipe.json recipe.json
 
-# Build release binary
+# Build dependencies - this is the caching Docker layer!
+RUN cargo chef cook --release --recipe-path recipe.json --bin datafeed_fetcher
+
+# Build application
+COPY . .
 RUN cargo build --release -p datafeed_fetcher
 
-FROM debian:trixie-slim as final
-RUN apt-get update && apt install -y openssl && apt install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+FROM debian:trixie-slim AS runtime
 WORKDIR /app
-
-# Copy our build and settings file
-COPY --from=builder /app/target/release/datafeed_fetcher ./datafeed_fetcher
-COPY --from=builder /app/Settings.toml ./Settings.toml
-COPY --from=builder /app/datafeed_processor/migrations ./migrations
-
-CMD ["/app/datafeed_fetcher"]
+RUN apt-get update && apt-get install -y ca-certificates && apt-get install -y openssl && apt-get install -y wget && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /app/target/release/datafeed_fetcher /usr/local/bin
+ENTRYPOINT ["/usr/local/bin/datafeed_fetcher"]

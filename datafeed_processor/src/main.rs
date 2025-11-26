@@ -2,15 +2,14 @@ mod database;
 mod error;
 mod helpers;
 
-use crate::database::queries::{
-    archive_and_delete_datafeed, complete_controller_sessions, fetch_datafeed_batch,
-};
+use crate::database::queries::{archive_and_delete_datafeed, fetch_datafeed_batch};
 use crate::error::{
     BacklogProcessingError, CallsignParseError, PayloadProcessingError, ProcessorError,
 };
 use crate::helpers::{
-    ActiveState, SessionCollections, SessionMaps, finalize_callsign_sessions,
-    finalize_position_sessions, handle_active_controller, load_active_state,
+    ActiveState, ParsedController, SessionCollections, SessionMaps, finalize_callsign_sessions,
+    finalize_controller_sessions, finalize_position_sessions, handle_active_controller,
+    load_active_state, parse_controller_parts,
 };
 use chrono::Utc;
 use shared::PostgresConfig;
@@ -21,7 +20,7 @@ use sqlx::postgres::{PgListener, PgPoolOptions};
 use sqlx::{Pool, Postgres};
 use std::collections::HashSet;
 use tokio::time::{Duration, sleep};
-use tracing::{debug, info, warn};
+use tracing::{debug, info, trace, warn};
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
@@ -136,6 +135,7 @@ async fn process_datafeed_payload(
         callsign_counts,
         position_counts,
         active_callsign_sessions,
+        active_callsign_sessions_map,
         active_position_sessions,
     } = &mut active_state;
     let mut active_callsign_ids: HashSet<Uuid> = HashSet::new();
@@ -145,32 +145,30 @@ async fn process_datafeed_payload(
     let mut controllers_to_complete: Vec<Uuid> = Vec::new();
 
     for controller in datafeed.controllers {
-        let cid: i32 = match controller.vatsim_data.cid.parse() {
-            Ok(cid) => cid,
-            Err(e) => {
-                warn!(error = ?e, cid = controller.vatsim_data.cid, "skipping controller with invalid CID");
-                continue;
-            }
-        };
-
-        let (prefix, _infix, suffix) = match parse_callsign(&controller.vatsim_data.callsign) {
+        let ParsedController {
+            cid,
+            prefix,
+            suffix,
+            position_id,
+        } = match parse_controller_parts(&controller) {
             Ok(parts) => parts,
             Err(e) => {
                 warn!(
                     error = ?e,
                     callsign = controller.vatsim_data.callsign,
-                    "skipping controller with invalid callsign format"
+                    cid = controller.vatsim_data.cid,
+                    "skipping controller with invalid identifiers"
                 );
                 continue;
             }
         };
-        let position_id = controller.primary_position_id.clone();
 
         if controller.is_active {
             let maps = SessionMaps {
                 active_by_cid,
                 callsign_counts,
                 position_counts,
+                active_callsign_sessions: active_callsign_sessions_map,
                 active_position_sessions,
             };
             let collections = SessionCollections {
@@ -180,6 +178,14 @@ async fn process_datafeed_payload(
                 extra_close_positions: &mut extra_close_positions,
                 controllers_to_complete: &mut controllers_to_complete,
             };
+
+            trace!(
+                cid = cid,
+                prefix = prefix,
+                suffix = suffix,
+                position_id = position_id,
+                "controller in datafeed is active, starting processing"
+            );
             handle_active_controller(
                 &mut tx,
                 &controller,
@@ -193,26 +199,32 @@ async fn process_datafeed_payload(
             )
             .await?;
         } else if let Some(existing) = active_by_cid.remove(&cid) {
+            trace!(
+                cid = cid,
+                prefix = prefix,
+                suffix = suffix,
+                position_id = position_id,
+                exisiting_controller_session_id = %existing.controller_session_id,
+                "controller in datafeed is no longer active, storing controller_session_id to close"
+            );
             controllers_to_complete.push(existing.controller_session_id);
         }
     }
 
-    controllers_to_complete.extend(
-        active_by_cid
-            .values()
-            .map(|state| state.controller_session_id),
-    );
-
-    if !controllers_to_complete.is_empty() {
-        let closed =
-            complete_controller_sessions(&mut *tx, &controllers_to_complete, datafeed.updated_at)
-                .await?;
+    let closed = finalize_controller_sessions(
+        &mut tx,
+        active_by_cid,
+        &mut controllers_to_complete,
+        datafeed.updated_at,
+    )
+    .await?;
+    if closed > 0 {
         debug!(closed_sessions = closed, "marked sessions as completed");
     }
 
     finalize_callsign_sessions(
         &mut tx,
-        &active_callsign_sessions,
+        active_callsign_sessions,
         &active_callsign_ids,
         extra_close_callsign,
         datafeed.updated_at,
@@ -221,7 +233,7 @@ async fn process_datafeed_payload(
 
     finalize_position_sessions(
         &mut tx,
-        &active_position_sessions,
+        active_position_sessions,
         &active_position_ids,
         extra_close_positions,
         datafeed.updated_at,
@@ -230,15 +242,4 @@ async fn process_datafeed_payload(
 
     tx.commit().await?;
     Ok(())
-}
-
-type Callsign<'a> = (&'a str, Option<&'a str>, &'a str);
-fn parse_callsign(callsign: &str) -> Result<Callsign<'_>, CallsignParseError> {
-    let parts: Vec<&str> = callsign.split('_').collect();
-    // Direct indexing below is safe because we have already checked the length
-    match parts.len() {
-        2 => Ok((parts[0], None, parts[1])),
-        3 => Ok((parts[0], Some(parts[1]), parts[2])),
-        other => Err(CallsignParseError::IncorrectFormat(other)),
-    }
 }

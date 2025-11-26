@@ -1,5 +1,6 @@
 use crate::database::queries::QueryError;
 use shared::error::InitializationError;
+use thiserror::Error;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProcessorError {
@@ -27,6 +28,22 @@ pub enum PayloadProcessingError {
     Query(#[from] QueryError),
     #[error("db transaction error: {0}")]
     TransactionError(#[from] sqlx::Error),
+}
+
+#[derive(Debug, Error)]
+pub enum ControllerParseError {
+    #[error("invalid cid {cid}: {source}")]
+    Cid {
+        cid: String,
+        #[source]
+        source: std::num::ParseIntError,
+    },
+    #[error("invalid callsign {callsign}: {source}")]
+    Callsign {
+        callsign: String,
+        #[source]
+        source: CallsignParseError,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
