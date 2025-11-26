@@ -1,26 +1,25 @@
 mod database;
 mod error;
+mod helpers;
 
 use crate::database::queries::{
-    archive_and_delete_datafeed, complete_callsign_sessions, complete_controller_sessions,
-    complete_position_sessions, fetch_datafeed_batch, get_active_callsign_sessions,
-    get_active_controller_session_keys, get_active_position_sessions,
-    get_or_create_callsign_session, get_or_create_position_session, insert_controller_session,
-    update_active_controller_session, update_callsign_session_last_seen,
-    update_position_session_last_seen,
+    archive_and_delete_datafeed, complete_controller_sessions, fetch_datafeed_batch,
 };
-
 use crate::error::{
     BacklogProcessingError, CallsignParseError, PayloadProcessingError, ProcessorError,
 };
-use chrono::{DateTime, Utc};
+use crate::helpers::{
+    ActiveState, SessionCollections, SessionMaps, finalize_callsign_sessions,
+    finalize_position_sessions, handle_active_controller, load_active_state,
+};
+use chrono::Utc;
 use shared::PostgresConfig;
 use shared::error::InitializationError;
 use shared::load_config;
 use shared::vnas::datafeed::DatafeedRoot;
 use sqlx::postgres::{PgListener, PgPoolOptions};
 use sqlx::{Pool, Postgres};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use tokio::time::{Duration, sleep};
 use tracing::{debug, info, warn};
 use tracing_subscriber::EnvFilter;
@@ -78,13 +77,11 @@ async fn main() -> Result<(), ProcessorError> {
 }
 
 async fn initialize_db(pg_config: &PostgresConfig) -> Result<Pool<Postgres>, InitializationError> {
-    // Create Db connection pool
     let pool = PgPoolOptions::new()
         .max_connections(5)
         .connect(&pg_config.connection_string)
         .await?;
 
-    // Run any new migrations
     sqlx::migrate!("./migrations").run(&pool).await?;
 
     Ok(pool)
@@ -133,47 +130,19 @@ async fn process_datafeed_payload(
 ) -> Result<(), PayloadProcessingError> {
     let mut tx = pool.begin().await?;
 
-    let active_sessions = get_active_controller_session_keys(&mut *tx).await?;
-    let mut active_by_cid: HashMap<i32, (Uuid, DateTime<Utc>, String, Uuid, String, Uuid)> =
-        active_sessions
-            .iter()
-            .map(|session| {
-                (
-                    session.cid,
-                    (
-                        session.id,
-                        session.login_time,
-                        session.connected_callsign.clone(),
-                        session.callsign_session_id,
-                        session.primary_position_id.clone(),
-                        session.position_session_id,
-                    ),
-                )
-            })
-            .collect();
-    let active_callsign_sessions = get_active_callsign_sessions(&mut *tx)
-        .await?
-        .into_iter()
-        .map(|s| s.id)
-        .collect::<HashSet<_>>();
-    let active_position_sessions = get_active_position_sessions(&mut *tx)
-        .await?
-        .into_iter()
-        .map(|s| (s.position_id, s.id))
-        .collect::<HashMap<_, _>>();
+    let mut active_state = load_active_state(&mut tx).await?;
+    let ActiveState {
+        active_by_cid,
+        callsign_counts,
+        position_counts,
+        active_callsign_sessions,
+        active_position_sessions,
+    } = &mut active_state;
     let mut active_callsign_ids: HashSet<Uuid> = HashSet::new();
     let mut active_position_ids: HashSet<String> = HashSet::new();
     let mut extra_close_callsign: Vec<Uuid> = Vec::new();
     let mut extra_close_positions: Vec<Uuid> = Vec::new();
-    let callsign_counts = active_sessions.iter().fold(HashMap::new(), |mut acc, s| {
-        *acc.entry(s.callsign_session_id).or_insert(0usize) += 1;
-        acc
-    });
-    let position_counts = active_sessions.iter().fold(HashMap::new(), |mut acc, s| {
-        *acc.entry(s.position_session_id).or_insert(0usize) += 1;
-        acc
-    });
-    let mut to_complete: Vec<Uuid> = Vec::new();
+    let mut controllers_to_complete: Vec<Uuid> = Vec::new();
 
     for controller in datafeed.controllers {
         let cid: i32 = match controller.vatsim_data.cid.parse() {
@@ -198,181 +167,66 @@ async fn process_datafeed_payload(
         let position_id = controller.primary_position_id.clone();
 
         if controller.is_active {
-            if let Some((
-                existing_id,
-                existing_login_time,
-                _existing_callsign,
-                callsign_session_id,
-                existing_position_id,
-                position_session_id,
-            )) = active_by_cid.remove(&cid)
-            {
-                // Check whether or not a new session has been started by comparing login times. Because we don't
-                // check more frequently than every 15 seconds, we may have missed a disconnect and reconnect
-                if existing_login_time == controller.login_time && existing_position_id == position_id {
-                    update_callsign_session_last_seen(
-                        &mut *tx,
-                        callsign_session_id,
-                        datafeed.updated_at,
-                    )
-                    .await?;
-                    update_position_session_last_seen(
-                        &mut *tx,
-                        position_session_id,
-                        datafeed.updated_at,
-                    )
-                    .await?;
-                    update_active_controller_session(
-                        &mut *tx,
-                        existing_id,
-                        &controller,
-                        datafeed.updated_at,
-                    )
-                    .await?;
-                    active_callsign_ids.insert(callsign_session_id);
-                    active_position_ids.insert(existing_position_id);
-                } else {
-                    // Connected again with a new login time; close old session and start a new one.
-                    to_complete.push(existing_id);
-                    let callsign_count = callsign_counts
-                        .get(&callsign_session_id)
-                        .copied()
-                        .unwrap_or(0);
-                    let new_callsign_session_id = if callsign_count <= 1 {
-                        extra_close_callsign.push(callsign_session_id);
-                        get_or_create_callsign_session(
-                            &mut *tx,
-                            &prefix,
-                            &suffix,
-                            datafeed.updated_at,
-                        )
-                        .await?
-                    } else {
-                        update_callsign_session_last_seen(
-                            &mut *tx,
-                            callsign_session_id,
-                            datafeed.updated_at,
-                        )
-                        .await?;
-                        callsign_session_id
-                    };
-                    active_callsign_ids.insert(new_callsign_session_id);
-
-                    let position_count = position_counts
-                        .get(&position_session_id)
-                        .copied()
-                        .unwrap_or(0);
-                    let new_position_session_id = if position_count <= 1 {
-                        extra_close_positions.push(position_session_id);
-                        get_or_create_position_session(
-                            &mut *tx,
-                            &position_id,
-                            datafeed.updated_at,
-                        )
-                        .await?
-                    } else {
-                        update_position_session_last_seen(
-                            &mut *tx,
-                            position_session_id,
-                            datafeed.updated_at,
-                        )
-                        .await?;
-                        position_session_id
-                    };
-                    active_position_ids.insert(position_id.clone());
-                    insert_controller_session(
-                        &mut *tx,
-                        &controller,
-                        cid,
-                        datafeed.updated_at,
-                        new_callsign_session_id,
-                        new_position_session_id,
-                    )
-                    .await?;
-                }
-            } else {
-                let callsign_session_id =
-                    get_or_create_callsign_session(&mut *tx, prefix, suffix, datafeed.updated_at)
-                        .await?;
-                active_callsign_ids.insert(callsign_session_id);
-                let position_session_id = if let Some(id) =
-                    active_position_sessions.get(&position_id).cloned()
-                {
-                    update_position_session_last_seen(&mut *tx, id, datafeed.updated_at).await?;
-                    id
-                } else {
-                    let new_id =
-                        get_or_create_position_session(&mut *tx, &position_id, datafeed.updated_at)
-                            .await?;
-                    new_id
-                };
-                active_position_ids.insert(position_id.clone());
-                insert_controller_session(
-                    &mut *tx,
-                    &controller,
-                    cid,
-                    datafeed.updated_at,
-                    callsign_session_id,
-                    position_session_id,
-                )
-                .await?;
-            }
-        } else if let Some((
-            existing_id,
-            _existing_login_time,
-            _existing_callsign,
-            _callsign_session_id,
-            _existing_position_id,
-            _existing_position_session_id,
-        )) = active_by_cid.remove(&cid)
-        {
-            // Controller reported inactive; close their session immediately.
-            to_complete.push(existing_id);
+            let maps = SessionMaps {
+                active_by_cid,
+                callsign_counts,
+                position_counts,
+                active_position_sessions,
+            };
+            let collections = SessionCollections {
+                active_callsign_ids: &mut active_callsign_ids,
+                active_position_ids: &mut active_position_ids,
+                extra_close_callsign: &mut extra_close_callsign,
+                extra_close_positions: &mut extra_close_positions,
+                controllers_to_complete: &mut controllers_to_complete,
+            };
+            handle_active_controller(
+                &mut tx,
+                &controller,
+                cid,
+                prefix,
+                suffix,
+                &position_id,
+                datafeed.updated_at,
+                maps,
+                collections,
+            )
+            .await?;
+        } else if let Some(existing) = active_by_cid.remove(&cid) {
+            controllers_to_complete.push(existing.controller_session_id);
         }
     }
 
-    // Any active sessions not seen in this feed disappeared from the network.
-    to_complete.extend(active_by_cid.values().map(|(id, _, _, _, _, _)| *id));
+    controllers_to_complete.extend(
+        active_by_cid
+            .values()
+            .map(|state| state.controller_session_id),
+    );
 
-    if !to_complete.is_empty() {
+    if !controllers_to_complete.is_empty() {
         let closed =
-            complete_controller_sessions(&mut *tx, &to_complete, datafeed.updated_at).await?;
+            complete_controller_sessions(&mut *tx, &controllers_to_complete, datafeed.updated_at)
+                .await?;
         debug!(closed_sessions = closed, "marked sessions as completed");
     }
 
-    let mut to_close_callsign: Vec<Uuid> = active_callsign_sessions
-        .difference(&active_callsign_ids)
-        .cloned()
-        .collect();
-    to_close_callsign.extend(extra_close_callsign);
-    if !to_close_callsign.is_empty() {
-        let closed =
-            complete_callsign_sessions(&mut *tx, &to_close_callsign, datafeed.updated_at).await?;
-        debug!(
-            closed_callsign_sessions = closed,
-            "marked callsign sessions as completed"
-        );
-    }
+    finalize_callsign_sessions(
+        &mut tx,
+        &active_callsign_sessions,
+        &active_callsign_ids,
+        extra_close_callsign,
+        datafeed.updated_at,
+    )
+    .await?;
 
-    let mut to_close_positions: Vec<Uuid> = active_position_sessions
-        .iter()
-        .filter_map(|(pos_id, session_id)| {
-            if active_position_ids.contains(pos_id) {
-                None
-            } else {
-                Some(*session_id)
-            }
-        })
-        .collect();
-    to_close_positions.extend(extra_close_positions);
-    if !to_close_positions.is_empty() {
-        let closed =
-            complete_position_sessions(&mut *tx, &to_close_positions, datafeed.updated_at).await?;
-        debug!(
-            closed_position_sessions = closed,
-            "marked position sessions as completed"
-        );
-    }
+    finalize_position_sessions(
+        &mut tx,
+        &active_position_sessions,
+        &active_position_ids,
+        extra_close_positions,
+        datafeed.updated_at,
+    )
+    .await?;
 
     tx.commit().await?;
     Ok(())
