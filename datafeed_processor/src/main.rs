@@ -331,7 +331,7 @@ async fn process_datafeed_payload(
     }
 
     if event_enabled!(Level::DEBUG) {
-        debug!("completed processing controller controller sessions");
+        debug!("completed processing controller sessions");
 
         let created = controller_actions
             .iter()
@@ -364,8 +364,17 @@ async fn process_datafeed_payload(
             })
             .collect::<Vec<_>>();
 
-        debug!(controllers = ?created, "created new controller sessions");
-        debug!(controllers = ?closed, "closed controller sessions");
+        if created.is_empty() {
+            debug!("no new controller sessions");
+        } else {
+            debug!(controllers = ?created, "created new controller sessions");
+        }
+
+        if closed.is_empty() {
+            debug!("no closed sessions");
+        } else {
+            debug!(controllers = ?closed, "closed controller sessions");
+        }
     }
 
     finalize_callsign_sessions(
