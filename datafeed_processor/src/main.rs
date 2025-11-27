@@ -9,11 +9,11 @@ use crate::database::queries::{
 };
 use crate::error::{BacklogProcessingError, PayloadProcessingError, ProcessorError};
 use crate::helpers::{
-    ActiveState, ControllerAction, ParsedController, ensure_callsign_session,
-    ensure_position_session, finalize_callsign_sessions, finalize_position_sessions,
-    load_active_state, parse_controller_parts,
+    ensure_callsign_session, ensure_position_session, finalize_callsign_sessions,
+    finalize_position_sessions, load_active_state, login_times_match, parse_controller_parts,
+    ActiveState, ControllerAction, ParsedController,
 };
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use shared::PostgresConfig;
 use shared::error::InitializationError;
 use shared::load_config;
@@ -172,7 +172,7 @@ async fn process_datafeed_payload(
                 "controller in datafeed is active, starting processing"
             );
             if let Some(existing) = existing_active_by_cid.remove(&cid) {
-                if existing.login_time == controller.login_time
+                if login_times_match(&existing.login_time, &controller.login_time)
                     && existing.position_id == position_id
                 {
                     trace!(

@@ -48,6 +48,10 @@ fn parse_callsign(callsign: &str) -> Result<Callsign<'_>, CallsignParseError> {
     }
 }
 
+pub fn login_times_match(a: &DateTime<Utc>, b: &DateTime<Utc>) -> bool {
+    a.timestamp_micros() == b.timestamp_micros()
+}
+
 pub async fn load_active_state(
     tx: &mut Transaction<'_, Postgres>,
 ) -> Result<ActiveState, QueryError> {
