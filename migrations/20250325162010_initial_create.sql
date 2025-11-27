@@ -112,4 +112,8 @@ create table datafeed_archive
     constraint datafeed_archive_pkey primary key (id)
 );
 
+-- We already store this compressed; avoid an extra TOAST compression pass.
+alter table datafeed_archive
+    alter column payload_compressed set storage external;
+
 create index idx_datafeed_archive_processed_at on datafeed_archive (processed_at);

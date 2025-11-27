@@ -1,3 +1,4 @@
+#[warn(clippy::pedantic)]
 mod database;
 mod error;
 mod helpers;

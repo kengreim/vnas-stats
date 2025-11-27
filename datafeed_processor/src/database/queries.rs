@@ -34,13 +34,13 @@ where
     E: Executor<'e, Database = Postgres>,
 {
     sqlx::query_as::<_, QueuedDatafeed>(
-        r#"
+        r"
         SELECT id, updated_at, payload, created_at
         FROM datafeed_queue
         ORDER BY updated_at
         FOR UPDATE SKIP LOCKED
         LIMIT $1
-        "#,
+        ",
     )
     .bind(limit)
     .fetch_all(executor)
@@ -61,7 +61,7 @@ where
     let payload_compressed = zstd::encode_all(payload_bytes.as_slice(), 3)?;
 
     sqlx::query(
-        r#"
+        r"
         INSERT INTO datafeed_archive (
             id,
             updated_at,
@@ -72,7 +72,7 @@ where
             processed_at
         )
         VALUES ($1, $2, $3, $4, 'zstd', $5, $6)
-        "#,
+        ",
     )
     .bind(message.id)
     .bind(message.updated_at)
@@ -119,11 +119,11 @@ where
     E: Executor<'e, Database = Postgres>,
 {
     sqlx::query_as::<_, ActiveSessionKey>(
-        r#"
+        r"
         SELECT id, cid, login_time, connected_callsign, callsign_session_id, primary_position_id, position_session_id
         FROM controller_sessions
         WHERE is_active = TRUE
-        "#,
+        ",
     )
     .fetch_all(executor)
     .await
@@ -146,7 +146,7 @@ where
     let id = Uuid::now_v7();
 
     sqlx::query(
-        r#"
+        r"
         INSERT INTO controller_sessions (
             id,
             login_time,
@@ -168,7 +168,7 @@ where
         VALUES (
             $1, $2, $3, NULL, NULL, $4, TRUE, $5, $6, $7, $8, $9, $10, $11, $12, $13
         )
-        "#,
+        ",
     )
     .bind(id)
     .bind(controller.login_time)
@@ -203,7 +203,7 @@ where
     let requested_rating: UserRating = controller.vatsim_data.requested_rating.into();
 
     sqlx::query(
-        r#"
+        r"
         UPDATE controller_sessions
         SET
             last_seen = $2,
@@ -214,7 +214,7 @@ where
             connected_callsign = $7,
             primary_position_id = $8
         WHERE id = $1
-        "#,
+        ",
     )
     .bind(session_id)
     .bind(seen_at)
@@ -239,7 +239,7 @@ where
     E: Executor<'e, Database = Postgres>,
 {
     let result = sqlx::query(
-        r#"
+        r"
         UPDATE controller_sessions
         SET
             is_active = FALSE,
@@ -247,7 +247,7 @@ where
             duration = $2 - start_time,
             last_seen = $2
         WHERE id = ANY($1)
-        "#,
+        ",
     )
     .bind(ids)
     .bind(ended_at)
@@ -265,11 +265,11 @@ where
     E: Executor<'e, Database = Postgres>,
 {
     sqlx::query_as::<_, CallsignSession>(
-        r#"
+        r"
         SELECT id, prefix, suffix, start_time, end_time, duration, last_seen, is_active, created_at
         FROM callsign_sessions
         WHERE is_active = TRUE
-        "#,
+        ",
     )
     .fetch_all(executor)
     .await
@@ -283,11 +283,11 @@ where
     E: Executor<'e, Database = Postgres>,
 {
     sqlx::query_as::<_, PositionSession>(
-        r#"
+        r"
         SELECT id, position_id, start_time, end_time, duration, last_seen, is_active, created_at
         FROM position_sessions
         WHERE is_active = TRUE
-        "#,
+        ",
     )
     .fetch_all(executor)
     .await
@@ -304,11 +304,11 @@ where
     for<'c> &'c mut E: Executor<'c, Database = Postgres>,
 {
     let existing = sqlx::query_scalar::<_, Uuid>(
-        r#"
+        r"
         SELECT id FROM callsign_sessions
         WHERE is_active = TRUE AND prefix = $1 AND suffix = $2
         FOR UPDATE
-        "#,
+        ",
     )
     .bind(prefix)
     .bind(suffix)
@@ -322,7 +322,7 @@ where
 
     let id = Uuid::now_v7();
     sqlx::query(
-        r#"
+        r"
         INSERT INTO callsign_sessions (
             id,
             prefix,
@@ -335,7 +335,7 @@ where
             created_at
         )
         VALUES ($1, $2, $3, $4, NULL, NULL, $4, TRUE, $4)
-        "#,
+        ",
     )
     .bind(id)
     .bind(prefix)
@@ -357,11 +357,11 @@ where
     for<'c> &'c mut E: Executor<'c, Database = Postgres>,
 {
     sqlx::query(
-        r#"
+        r"
         UPDATE callsign_sessions
         SET last_seen = $2
         WHERE id = $1
-        "#,
+        ",
     )
     .bind(id)
     .bind(seen_at)
@@ -380,7 +380,7 @@ where
     E: Executor<'e, Database = Postgres>,
 {
     let result = sqlx::query(
-        r#"
+        r"
         UPDATE callsign_sessions
         SET
             is_active = FALSE,
@@ -388,7 +388,7 @@ where
             duration = $2 - start_time,
             last_seen = $2
         WHERE id = ANY($1)
-        "#,
+        ",
     )
     .bind(ids)
     .bind(ended_at)
@@ -408,11 +408,11 @@ where
     for<'c> &'c mut E: Executor<'c, Database = Postgres>,
 {
     let existing = sqlx::query_scalar::<_, Uuid>(
-        r#"
+        r"
         SELECT id FROM position_sessions
         WHERE is_active = TRUE AND position_id = $1
         FOR UPDATE
-        "#,
+        ",
     )
     .bind(position_id)
     .fetch_optional(&mut *executor)
@@ -425,7 +425,7 @@ where
 
     let id = Uuid::now_v7();
     sqlx::query(
-        r#"
+        r"
         INSERT INTO position_sessions (
             id,
             position_id,
@@ -437,7 +437,7 @@ where
             created_at
         )
         VALUES ($1, $2, $3, NULL, NULL, $3, TRUE, $3)
-        "#,
+        ",
     )
     .bind(id)
     .bind(position_id)
@@ -458,11 +458,11 @@ where
     for<'c> &'c mut E: Executor<'c, Database = Postgres>,
 {
     sqlx::query(
-        r#"
+        r"
         UPDATE position_sessions
         SET last_seen = $2
         WHERE id = $1
-        "#,
+        ",
     )
     .bind(id)
     .bind(seen_at)
@@ -481,7 +481,7 @@ where
     E: Executor<'e, Database = Postgres>,
 {
     let result = sqlx::query(
-        r#"
+        r"
         UPDATE position_sessions
         SET
             is_active = FALSE,
@@ -489,7 +489,7 @@ where
             duration = $2 - start_time,
             last_seen = $2
         WHERE id = ANY($1)
-        "#,
+        ",
     )
     .bind(ids)
     .bind(ended_at)

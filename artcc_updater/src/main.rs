@@ -1,3 +1,4 @@
+#[warn(clippy::pedantic)]
 mod model;
 
 use axum::Router;

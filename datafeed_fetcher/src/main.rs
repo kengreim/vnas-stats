@@ -1,3 +1,4 @@
+#[warn(clippy::pedantic)]
 mod error;
 
 use crate::error::{EnqueueError, FetchError};
@@ -86,9 +87,7 @@ async fn initialize_db(pg_config: &PostgresConfig) -> Result<Pool<Postgres>, Ini
         .await?;
 
     // Run any new migrations
-    sqlx::migrate!("../migrations")
-        .run(&pool)
-        .await?;
+    sqlx::migrate!("../migrations").run(&pool).await?;
 
     Ok(pool)
 }
