@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use shared::vnas::datafeed::Controller;
 use sqlx::{Postgres, Transaction};
 use std::collections::{HashMap, HashSet};
-use tracing::{Level, debug, event_enabled, trace};
+use tracing::{Level, event_enabled, trace};
 use uuid::Uuid;
 
 type Callsign<'a> = (&'a str, Option<&'a str>, &'a str);
@@ -21,6 +21,7 @@ pub struct ActiveControllerState {
     pub callsign_session_id: Uuid,
     pub position_id: String,
     pub position_session_id: Uuid,
+    pub connected_callsign: String,
 }
 
 pub struct ParsedController<'a> {
@@ -69,6 +70,7 @@ pub async fn load_active_state(
                     callsign_session_id: session.callsign_session_id,
                     position_id: session.primary_position_id.clone(),
                     position_session_id: session.position_session_id,
+                    connected_callsign: session.connected_callsign.clone(),
                 },
             )
         })
@@ -118,7 +120,7 @@ pub fn parse_controller_parts(
     })
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ControllerAction {
     UpdateExisting {
         session_id: Uuid,
@@ -134,7 +136,17 @@ pub enum ControllerAction {
     },
     Close {
         session_id: Uuid,
+        cid: i32,
+        connected_callsign: String,
+        reason: ControllerCloseReason,
     },
+}
+
+#[derive(Clone, Debug)]
+pub enum ControllerCloseReason {
+    MissingFromDatafeed,
+    ReconnectedOrChangedPosition,
+    DeactivatedPosition,
 }
 
 pub async fn ensure_callsign_session(

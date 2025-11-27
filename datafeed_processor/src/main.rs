@@ -8,12 +8,13 @@ use crate::database::queries::{
     update_position_session_last_seen,
 };
 use crate::error::{BacklogProcessingError, PayloadProcessingError, ProcessorError};
+use crate::helpers::ControllerCloseReason;
 use crate::helpers::{
-    ensure_callsign_session, ensure_position_session, finalize_callsign_sessions,
-    finalize_position_sessions, load_active_state, login_times_match, parse_controller_parts,
-    ActiveState, ControllerAction, ParsedController,
+    ActiveState, ControllerAction, ParsedController, ensure_callsign_session,
+    ensure_position_session, finalize_callsign_sessions, finalize_position_sessions,
+    load_active_state, login_times_match, parse_controller_parts,
 };
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use shared::PostgresConfig;
 use shared::error::InitializationError;
 use shared::load_config;
@@ -196,6 +197,9 @@ async fn process_datafeed_payload(
                     );
                     controller_actions.push(ControllerAction::Close {
                         session_id: existing.controller_session_id,
+                        cid: cid,
+                        connected_callsign: existing.connected_callsign,
+                        reason: ControllerCloseReason::ReconnectedOrChangedPosition,
                     });
                     controller_actions.push(ControllerAction::CreateNew {
                         controller: controller.clone(),
@@ -224,19 +228,26 @@ async fn process_datafeed_payload(
             );
             controller_actions.push(ControllerAction::Close {
                 session_id: existing.controller_session_id,
+                cid: cid,
+                connected_callsign: existing.connected_callsign,
+                reason: ControllerCloseReason::DeactivatedPosition,
             });
         }
     }
 
-    let remaining_to_close = existing_active_by_cid.values().collect::<Vec<_>>();
     if event_enabled!(Level::TRACE) {
+        let remaining_to_close = existing_active_by_cid.values().collect::<Vec<_>>();
         for missing in &remaining_to_close {
             trace!(controller = ?missing, "previously tracked controller no longer seen in datafeed");
         }
     }
-    controller_actions.extend(remaining_to_close.into_iter().map(|state| {
+
+    controller_actions.extend(existing_active_by_cid.into_iter().map(|(cid, state)| {
         ControllerAction::Close {
             session_id: state.controller_session_id,
+            cid: *cid,
+            connected_callsign: state.connected_callsign.clone(),
+            reason: ControllerCloseReason::MissingFromDatafeed,
         }
     }));
 
@@ -304,7 +315,7 @@ async fn process_datafeed_payload(
                 active_callsign_ids.insert(callsign_session_id);
                 active_position_ids.insert(position_id.to_string());
             }
-            ControllerAction::Close { session_id } => {
+            ControllerAction::Close { session_id, .. } => {
                 close_controller_session_ids.push(*session_id);
             }
         }
@@ -317,6 +328,44 @@ async fn process_datafeed_payload(
             datafeed.updated_at,
         )
         .await?;
+    }
+
+    if event_enabled!(Level::DEBUG) {
+        debug!("completed processing controller controller sessions");
+
+        let created = controller_actions
+            .iter()
+            .filter_map(|a| {
+                if let ControllerAction::CreateNew {
+                    controller, cid, ..
+                } = a
+                {
+                    Some((cid, controller.vatsim_data.callsign.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let closed = controller_actions
+            .iter()
+            .filter_map(|a| {
+                if let ControllerAction::Close {
+                    cid,
+                    connected_callsign,
+                    reason,
+                    ..
+                } = a
+                {
+                    Some((cid, connected_callsign, reason))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        debug!(controllers = ?created, "created new controller sessions");
+        debug!(controllers = ?closed, "closed controller sessions");
     }
 
     finalize_callsign_sessions(
