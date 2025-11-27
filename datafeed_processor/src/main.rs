@@ -197,7 +197,7 @@ async fn process_datafeed_payload(
                     );
                     controller_actions.push(ControllerAction::Close {
                         session_id: existing.controller_session_id,
-                        cid: cid,
+                        cid,
                         connected_callsign: existing.connected_callsign,
                         reason: ControllerCloseReason::ReconnectedOrChangedPosition,
                     });
@@ -228,7 +228,7 @@ async fn process_datafeed_payload(
             );
             controller_actions.push(ControllerAction::Close {
                 session_id: existing.controller_session_id,
-                cid: cid,
+                cid,
                 connected_callsign: existing.connected_callsign,
                 reason: ControllerCloseReason::DeactivatedPosition,
             });
@@ -242,7 +242,7 @@ async fn process_datafeed_payload(
         }
     }
 
-    controller_actions.extend(existing_active_by_cid.into_iter().map(|(cid, state)| {
+    controller_actions.extend(existing_active_by_cid.iter_mut().map(|(cid, state)| {
         ControllerAction::Close {
             session_id: state.controller_session_id,
             cid: *cid,
@@ -251,8 +251,25 @@ async fn process_datafeed_payload(
         }
     }));
 
-    // Second pass: resolve callsign/position sessions and apply controller changes
-    let mut close_controller_session_ids: Vec<Uuid> = Vec::new();
+    // Second pass: Close controller sessions first to avoid unique constraint conflicts
+    let close_controller_session_ids: Vec<Uuid> = controller_actions
+        .iter()
+        .filter_map(|action| match action {
+            ControllerAction::Close { session_id, .. } => Some(*session_id),
+            _ => None,
+        })
+        .collect();
+
+    if !close_controller_session_ids.is_empty() {
+        let _ = complete_controller_sessions(
+            &mut *tx,
+            &close_controller_session_ids,
+            datafeed.updated_at,
+        )
+        .await?;
+    }
+
+    // Now, handle updates and inserts (any matches on Close do nothing)
     for action in &controller_actions {
         match action {
             ControllerAction::UpdateExisting {
@@ -276,7 +293,7 @@ async fn process_datafeed_payload(
                 update_active_controller_session(
                     tx.as_mut(),
                     *session_id,
-                    &controller,
+                    controller,
                     datafeed.updated_at,
                 )
                 .await?;
@@ -292,20 +309,20 @@ async fn process_datafeed_payload(
                 let callsign_session_id = ensure_callsign_session(
                     &mut tx,
                     existing_active_callsign_sessions_map,
-                    &callsign_key,
+                    callsign_key,
                     datafeed.updated_at,
                 )
                 .await?;
                 let position_session_id = ensure_position_session(
                     &mut tx,
                     existing_active_position_sessions,
-                    &position_id,
+                    position_id,
                     datafeed.updated_at,
                 )
                 .await?;
                 insert_controller_session(
                     tx.as_mut(),
-                    &controller,
+                    controller,
                     *cid,
                     datafeed.updated_at,
                     callsign_session_id,
@@ -315,21 +332,12 @@ async fn process_datafeed_payload(
                 active_callsign_ids.insert(callsign_session_id);
                 active_position_ids.insert(position_id.to_string());
             }
-            ControllerAction::Close { session_id, .. } => {
-                close_controller_session_ids.push(*session_id);
-            }
+            // Handled close actions before this loop
+            ControllerAction::Close { .. } => {}
         }
     }
 
-    if !close_controller_session_ids.is_empty() {
-        let _ = complete_controller_sessions(
-            &mut *tx,
-            &close_controller_session_ids,
-            datafeed.updated_at,
-        )
-        .await?;
-    }
-
+    // Only need to run these additional allocations if we are logging at DEBUG level
     if event_enabled!(Level::DEBUG) {
         debug!("completed processing controller sessions");
 
