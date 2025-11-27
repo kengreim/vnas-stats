@@ -16,3 +16,4 @@ thiserror = "2.0.17"
 uuid = { version = "1.18.1", features = ["v7"] }
 zstd = "0.13.3"
 axum = "0.8.7"
+parking_lot = "0.12.5"
