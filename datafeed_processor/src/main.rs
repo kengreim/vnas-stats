@@ -15,7 +15,13 @@ use crate::helpers::{
     ensure_position_session, finalize_callsign_sessions, finalize_position_sessions,
     load_active_state, login_times_match, parse_controller_parts,
 };
-use chrono::Utc;
+use axum::Router;
+use axum::extract::State;
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
+use axum::routing::get;
+use chrono::{DateTime, Utc};
+use parking_lot::RwLock;
 use shared::PostgresConfig;
 use shared::error::InitializationError;
 use shared::load_config;
@@ -23,6 +29,8 @@ use shared::vnas::datafeed::DatafeedRoot;
 use sqlx::postgres::{PgListener, PgPoolOptions};
 use sqlx::{Pool, Postgres};
 use std::collections::HashSet;
+use std::sync::Arc;
+use tokio::net::TcpListener;
 use tokio::time::{Duration, sleep};
 use tracing::{Level, debug, event_enabled, info, trace, warn};
 use tracing_subscriber::EnvFilter;
@@ -45,9 +53,67 @@ async fn main() -> Result<(), ProcessorError> {
     // Initialize DB
     let db_pool = initialize_db(&config.postgres).await?;
 
+    let last_processed_datafeed = Arc::new(RwLock::new(None));
+    let last_processed_datafeed_clone = Arc::clone(&last_processed_datafeed);
+
+    let axum_handle =
+        tokio::spawn(async move { run_health_server(last_processed_datafeed_clone).await });
+
+    let processor_handle =
+        tokio::spawn(
+            async move { datafeed_processing_loop(db_pool, last_processed_datafeed).await },
+        );
+
+    let _ = tokio::join!(axum_handle, processor_handle);
+
+    Ok(())
+}
+
+#[derive(Clone)]
+struct AxumState {
+    last_processed_datafeed: Arc<RwLock<Option<DateTime<Utc>>>>,
+}
+
+async fn run_health_server(last_processed_datafeed: Arc<RwLock<Option<DateTime<Utc>>>>) {
+    info!("starting axum health server");
+    let app = Router::new()
+        .route("/health", get(health_check))
+        .with_state(AxumState {
+            last_processed_datafeed,
+        });
+    let listener = TcpListener::bind("127.0.0.1:3000").await.unwrap();
+    axum::serve(listener, app).await.unwrap();
+}
+
+async fn health_check(State(state): State<AxumState>) -> impl IntoResponse {
+    let last_processed_datafeed = state.last_processed_datafeed.read().clone();
+    let msg = if let Some(timestamp) = last_processed_datafeed {
+        format!("Last processed datafeed updated_at: {timestamp}")
+    } else {
+        "No datafeeds processed yet".into()
+    };
+
+    (StatusCode::OK, msg)
+}
+
+async fn initialize_db(pg_config: &PostgresConfig) -> Result<Pool<Postgres>, InitializationError> {
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&pg_config.connection_string)
+        .await?;
+
+    sqlx::migrate!("../migrations").run(&pool).await?;
+
+    Ok(pool)
+}
+
+async fn datafeed_processing_loop(
+    db_pool: Pool<Postgres>,
+    last_processed_datafeed: Arc<RwLock<Option<DateTime<Utc>>>>,
+) -> Result<(), ProcessorError> {
     // Process any backlog before listening
     info!("starting processing backlog of queued datafeeds");
-    process_pending_datafeeds(&db_pool, 25).await?;
+    process_pending_datafeeds(&db_pool, &last_processed_datafeed, 25).await?;
 
     // Listen for new datafeeds
     let mut listener = PgListener::connect_with(&db_pool)
@@ -69,7 +135,7 @@ async fn main() -> Result<(), ProcessorError> {
                 // If this fails, we end all processing by throwing error out of main
                 // because any datafeeds that failed to process will always remain in the queue
                 // and will cause future batches to fail until fixed
-                process_pending_datafeeds(&db_pool, 10).await?;
+                process_pending_datafeeds(&db_pool, &last_processed_datafeed, 10).await?;
             }
             Err(e) => {
                 warn!(error = ?e, "error receiving Postgres notification");
@@ -77,21 +143,13 @@ async fn main() -> Result<(), ProcessorError> {
             }
         }
     }
-}
 
-async fn initialize_db(pg_config: &PostgresConfig) -> Result<Pool<Postgres>, InitializationError> {
-    let pool = PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&pg_config.connection_string)
-        .await?;
-
-    sqlx::migrate!("../migrations").run(&pool).await?;
-
-    Ok(pool)
+    Ok(())
 }
 
 async fn process_pending_datafeeds(
     pool: &Pool<Postgres>,
+    last_processed_datafeed: &RwLock<Option<DateTime<Utc>>>,
     limit: i64,
 ) -> Result<(), BacklogProcessingError> {
     loop {
@@ -103,6 +161,7 @@ async fn process_pending_datafeeds(
             break;
         }
 
+        let mut latest = None;
         for message in messages {
             let parsed = serde_json::from_value::<DatafeedRoot>(message.payload.clone());
             let datafeed_root = match parsed {
@@ -113,15 +172,17 @@ async fn process_pending_datafeeds(
                 }
             };
 
-            if let Err(e) = process_datafeed_payload(pool, datafeed_root).await {
+            if let Err(e) = process_datafeed_payload(pool, &datafeed_root).await {
                 tx.rollback().await?;
                 return Err(e.into());
             }
 
             archive_and_delete_datafeed(&mut *tx, &message, Utc::now()).await?;
+            latest = Some(datafeed_root.updated_at);
         }
 
         tx.commit().await.map_err(BacklogProcessingError::from)?;
+        *last_processed_datafeed.write() = latest;
     }
 
     Ok(())
@@ -129,7 +190,7 @@ async fn process_pending_datafeeds(
 
 async fn process_datafeed_payload(
     pool: &Pool<Postgres>,
-    datafeed: DatafeedRoot,
+    datafeed: &DatafeedRoot,
 ) -> Result<(), PayloadProcessingError> {
     let mut tx = pool.begin().await?;
 
@@ -146,13 +207,13 @@ async fn process_datafeed_payload(
 
     // First pass: only handle Controller-Position Sessions (i.e., a session with the unique combination
     // of a CID, primary position ID and loging time)
-    for controller in datafeed.controllers {
+    for controller in &datafeed.controllers {
         let ParsedController {
             cid,
             prefix,
             suffix,
             position_id,
-        } = match parse_controller_parts(&controller) {
+        } = match parse_controller_parts(controller) {
             Ok(parts) => parts,
             Err(e) => {
                 warn!(

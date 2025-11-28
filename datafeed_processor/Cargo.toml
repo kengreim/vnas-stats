@@ -15,3 +15,5 @@ uuid.workspace = true
 chrono.workspace = true
 serde.workspace = true
 zstd.workspace = true
+axum.workspace = true
+parking_lot.workspace = true
