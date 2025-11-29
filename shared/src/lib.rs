@@ -63,7 +63,7 @@ pub async fn initialize_db(
         .await?;
 
     // Run any new migrations
-    sqlx::migrate!("../migrations").run(&pool).await?;
+    sqlx::migrate!("./migrations").run(&pool).await?;
 
     Ok(pool)
 }
