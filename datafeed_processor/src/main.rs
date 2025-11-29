@@ -8,7 +8,7 @@ use crate::database::queries::{
     insert_controller_session, update_active_controller_session, update_callsign_session_last_seen,
     update_position_session_last_seen,
 };
-use crate::error::{BacklogProcessingError, PayloadProcessingError, ProcessorError};
+use crate::error::{BacklogProcessingError, PayloadProcessingError, ProcessorMainError};
 use crate::helpers::ControllerCloseReason;
 use crate::helpers::{
     ActiveState, ControllerAction, ParsedController, ensure_callsign_session,
@@ -23,20 +23,21 @@ use axum::routing::get;
 use chrono::{DateTime, Utc};
 use parking_lot::RwLock;
 use shared::error::InitializationError;
-use shared::{initialize_db, load_config};
 use shared::vnas::datafeed::DatafeedRoot;
+use shared::{initialize_db, load_config, shutdown_listener};
 use sqlx::postgres::PgListener;
 use sqlx::{Pool, Postgres};
 use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::time::{Duration, sleep};
+use tokio_util::sync::CancellationToken;
 use tracing::{Level, debug, event_enabled, info, trace, warn};
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
 #[tokio::main]
-async fn main() -> Result<(), ProcessorError> {
+async fn main() -> Result<(), ProcessorMainError> {
     let subscriber = tracing_subscriber::fmt()
         .compact()
         .with_file(true)
@@ -52,18 +53,39 @@ async fn main() -> Result<(), ProcessorError> {
     // Initialize DB
     let db_pool = initialize_db(&config.postgres).await?;
 
+    // Arc for state for health check endpoint
     let last_processed_datafeed = Arc::new(RwLock::new(None));
-    let last_processed_datafeed_clone = Arc::clone(&last_processed_datafeed);
 
-    let axum_handle =
-        tokio::spawn(async move { run_health_server(last_processed_datafeed_clone).await });
+    // Cancellation token shared across tasks; listener cancels on SIGINT/SIGTERM.
+    let shutdown_token = CancellationToken::new();
 
-    let processor_handle =
-        tokio::spawn(
-            async move { datafeed_processing_loop(db_pool, last_processed_datafeed).await },
-        );
+    // Spawn listener, axum (health check endpoint) and datafeed processor tasks
+    let signal_handle = tokio::spawn(shutdown_listener(Some(shutdown_token.clone())));
+    let axum_handle = tokio::spawn(run_health_server(
+        Arc::clone(&last_processed_datafeed),
+        shutdown_token.clone(),
+    ));
+    let processor_handle = tokio::spawn(datafeed_processing_loop(
+        db_pool,
+        Arc::clone(&last_processed_datafeed),
+        shutdown_token.clone(),
+    ));
 
-    let _ = tokio::join!(axum_handle, processor_handle);
+    // If any of the tasks terminate, propagate a graceful cancellation and return the initial error
+    tokio::select! {
+        res = axum_handle => {
+            shutdown_token.cancel();
+            res??;
+        }
+        res = processor_handle => {
+            shutdown_token.cancel();
+            res??;
+        }
+        res = signal_handle => {
+            shutdown_token.cancel();
+            res?;
+        }
+    }
 
     Ok(())
 }
@@ -73,7 +95,10 @@ struct AxumState {
     last_processed_datafeed: Arc<RwLock<Option<DateTime<Utc>>>>,
 }
 
-async fn run_health_server(last_processed_datafeed: Arc<RwLock<Option<DateTime<Utc>>>>) {
+async fn run_health_server(
+    last_processed_datafeed: Arc<RwLock<Option<DateTime<Utc>>>>,
+    shutdown: CancellationToken,
+) -> Result<(), std::io::Error> {
     info!("starting axum health server");
     let app = Router::new()
         .route("/health", get(health_check))
@@ -81,7 +106,13 @@ async fn run_health_server(last_processed_datafeed: Arc<RwLock<Option<DateTime<U
             last_processed_datafeed,
         });
     let listener = TcpListener::bind("127.0.0.1:3000").await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            shutdown.cancelled().await;
+        })
+        .await?;
+
+    Ok(())
 }
 
 async fn health_check(State(state): State<AxumState>) -> impl IntoResponse {
@@ -98,7 +129,8 @@ async fn health_check(State(state): State<AxumState>) -> impl IntoResponse {
 async fn datafeed_processing_loop(
     db_pool: Pool<Postgres>,
     last_processed_datafeed: Arc<RwLock<Option<DateTime<Utc>>>>,
-) -> Result<(), ProcessorError> {
+    shutdown: CancellationToken,
+) -> Result<(), ProcessorMainError> {
     // Process any backlog before listening
     info!("starting processing backlog of queued datafeeds");
     process_pending_datafeeds(&db_pool, &last_processed_datafeed, 25).await?;
@@ -114,25 +146,41 @@ async fn datafeed_processing_loop(
     info!("listening for new datafeeds via Postgres NOTIFY");
 
     loop {
-        match listener.recv().await {
-            Ok(notification) => {
-                debug!(
-                    payload = notification.payload(),
-                    "received datafeed notification"
-                );
-                // If this fails, we end all processing by throwing error out of main
-                // because any datafeeds that failed to process will always remain in the queue
-                // and will cause future batches to fail until fixed
-                process_pending_datafeeds(&db_pool, &last_processed_datafeed, 10).await?;
+        tokio::select! {
+            _ = shutdown.cancelled() => {
+                info!("shutdown requested, exiting processor loop");
+                break;
             }
-            Err(e) => {
-                warn!(error = ?e, "error receiving Postgres notification");
-                sleep(Duration::from_secs(1)).await;
+            _ = datafeed_msg_recv(&mut listener, &db_pool, last_processed_datafeed) => {
+
             }
         }
     }
 
     Ok(())
+}
+
+async fn datafeed_msg_recv(
+    listener: &mut PgListener,
+    db_pool: &Pool<Postgres>,
+    last_processed_datafeed: Arc<RwLock<Option<DateTime<Utc>>>>,
+) {
+    match listener.recv().await {
+        Ok(notification) => {
+            debug!(
+                payload = notification.payload(),
+                "received datafeed notification"
+            );
+            // If this fails, we end all processing by throwing error out of main
+            // because any datafeeds that failed to process will always remain in the queue
+            // and will cause future batches to fail until fixed
+            process_pending_datafeeds(&db_pool, &last_processed_datafeed, 10).await?;
+        }
+        Err(e) => {
+            warn!(error = ?e, "error receiving Postgres notification");
+            sleep(Duration::from_secs(1)).await;
+        }
+    }
 }
 
 async fn process_pending_datafeeds(

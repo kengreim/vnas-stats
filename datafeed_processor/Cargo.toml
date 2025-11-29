@@ -17,3 +17,4 @@ serde.workspace = true
 zstd.workspace = true
 axum.workspace = true
 parking_lot.workspace = true
+tokio-util.workspace = true

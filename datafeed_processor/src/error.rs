@@ -2,15 +2,19 @@ use crate::database::queries::QueryError;
 use shared::error::InitializationError;
 use thiserror::Error;
 
-#[derive(Debug, thiserror::Error)]
-pub enum ProcessorError {
+#[derive(Debug, Error)]
+pub enum ProcessorMainError {
     #[error("failed to initialize datafeed processor: {0}")]
     Initialization(#[from] InitializationError),
     #[error("failed to clear initial backlog of fetched datafeeds")]
     InitialBacklog(#[from] BacklogProcessingError),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Join(#[from] tokio::task::JoinError),
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Error)]
 pub enum BacklogProcessingError {
     #[error("query error: {0}")]
     Query(#[from] QueryError),
@@ -20,7 +24,7 @@ pub enum BacklogProcessingError {
     TransactionError(#[from] sqlx::Error),
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Error)]
 pub enum PayloadProcessingError {
     #[error("datafeed deserialization error: {0}")]
     Deserialize(#[from] serde_json::Error),
@@ -46,7 +50,7 @@ pub enum ControllerParseError {
     },
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Error)]
 pub enum CallsignParseError {
     #[error("callsign must have 2 or 3 parts delimited by an underscore, but found {0}")]
     IncorrectFormat(usize),

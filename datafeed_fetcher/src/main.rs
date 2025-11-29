@@ -66,6 +66,7 @@ async fn main() -> Result<(), MainError> {
         shutdown_token.clone(),
     ));
 
+    // If any of the tasks terminate, propagate a graceful cancellation and return the initial error
     tokio::select! {
         res = axum_handle => {
             shutdown_token.cancel();
