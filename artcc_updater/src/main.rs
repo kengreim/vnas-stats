@@ -9,11 +9,11 @@ use axum::routing::get;
 use chrono::{DateTime, Utc};
 use model::{FlatFacility, FlatPosition};
 use reqwest::Client;
-use shared::PostgresConfig;
 use shared::error::InitializationError;
 use shared::load_config;
 use shared::vnas::api::minimal::Facility as MinimalFacility;
 use shared::vnas::api::minimal::{ArtccRoot as MinimalArtccRoot, ArtccRoot};
+use shared::{PostgresConfig, initialize_db};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Pool, Postgres, Row};
 use thiserror::Error;
@@ -73,17 +73,6 @@ async fn update_data(State(state): State<AxumState>) -> impl IntoResponse {
             (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
         }
     }
-}
-
-async fn initialize_db(pg_config: &PostgresConfig) -> Result<Pool<Postgres>, AppError> {
-    let pool = PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&pg_config.connection_string)
-        .await?;
-
-    sqlx::migrate!("../migrations").run(&pool).await?;
-
-    Ok(pool)
 }
 
 async fn fetch_and_process(client: &Client, pool: &Pool<Postgres>) -> Result<(), AppError> {

@@ -11,9 +11,9 @@ use chrono::{DateTime, TimeDelta, Utc};
 use parking_lot::RwLock;
 use serde_json::Value;
 use shared::error::InitializationError;
-use shared::load_config;
 use shared::vnas::datafeed::{VnasEnvironment, datafeed_url};
 use shared::{PostgresConfig, shutdown_listener};
+use shared::{initialize_db, load_config};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Pool, Postgres};
 use std::sync::Arc;
@@ -227,18 +227,6 @@ async fn health_check(State(state): State<AxumState>) -> impl IntoResponse {
             format!("Datafeed last successfully fetched: {last_successful_update}"),
         )
     }
-}
-
-async fn initialize_db(pg_config: &PostgresConfig) -> Result<Pool<Postgres>, InitializationError> {
-    let pool = PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&pg_config.connection_string)
-        .await?;
-
-    // Run any new migrations
-    sqlx::migrate!("../migrations").run(&pool).await?;
-
-    Ok(pool)
 }
 
 async fn fetch_datafeed(client: &reqwest::Client) -> Result<(Value, DateTime<Utc>), FetchError> {

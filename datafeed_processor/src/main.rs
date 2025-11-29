@@ -22,10 +22,10 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use chrono::{DateTime, Utc};
 use parking_lot::RwLock;
-use shared::PostgresConfig;
 use shared::error::InitializationError;
 use shared::load_config;
 use shared::vnas::datafeed::DatafeedRoot;
+use shared::{PostgresConfig, initialize_db};
 use sqlx::postgres::{PgListener, PgPoolOptions};
 use sqlx::{Pool, Postgres};
 use std::collections::HashSet;
@@ -94,17 +94,6 @@ async fn health_check(State(state): State<AxumState>) -> impl IntoResponse {
     };
 
     (StatusCode::OK, msg)
-}
-
-async fn initialize_db(pg_config: &PostgresConfig) -> Result<Pool<Postgres>, InitializationError> {
-    let pool = PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&pg_config.connection_string)
-        .await?;
-
-    sqlx::migrate!("../migrations").run(&pool).await?;
-
-    Ok(pool)
 }
 
 async fn datafeed_processing_loop(

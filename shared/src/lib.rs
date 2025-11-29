@@ -1,9 +1,11 @@
 pub mod vnas;
 
-use crate::error::ConfigError;
+use crate::error::{ConfigError, InitializationError};
 use figment::Figment;
 use figment::providers::{Env, Format, Toml};
 use serde::Deserialize;
+use sqlx::postgres::PgPoolOptions;
+use sqlx::{Pool, Postgres};
 use tokio::signal;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
@@ -50,6 +52,20 @@ pub mod error {
         #[error(transparent)]
         Db(#[from] sqlx::Error),
     }
+}
+
+pub async fn initialize_db(
+    pg_config: &PostgresConfig,
+) -> Result<Pool<Postgres>, InitializationError> {
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&pg_config.connection_string)
+        .await?;
+
+    // Run any new migrations
+    sqlx::migrate!("../migrations").run(&pool).await?;
+
+    Ok(pool)
 }
 
 pub async fn shutdown_listener(token: Option<CancellationToken>) {
