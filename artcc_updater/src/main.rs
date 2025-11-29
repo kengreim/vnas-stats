@@ -49,7 +49,10 @@ async fn main() -> Result<(), AppError> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
         .await
         .unwrap();
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shared::shutdown_listener(None))
+        .await
+        .unwrap();
 
     Ok(())
 }

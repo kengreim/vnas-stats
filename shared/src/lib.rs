@@ -6,6 +6,7 @@ use figment::providers::{Env, Format, Toml};
 use serde::Deserialize;
 use tokio::signal;
 use tokio_util::sync::CancellationToken;
+use tracing::info;
 
 pub const DATAFEED_QUEUE_NAME: &str = "vnas_stats";
 pub const ENV_VAR_PREFIX: &str = "VNAS_STATS__";
@@ -51,19 +52,24 @@ pub mod error {
     }
 }
 
-pub async fn shutdown_listener(token: CancellationToken) {
+pub async fn shutdown_listener(token: Option<CancellationToken>) {
     let ctrl_c = signal::ctrl_c();
     #[cfg(unix)]
-    let terminate = signal::unix::signal(signal::unix::SignalKind::terminate())
-        .expect("failed to install SIGTERM handler")
-        .recv();
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
     #[cfg(not(unix))]
     let terminate = std::future::pending::<()>();
 
     tokio::select! {
-        _ = ctrl_c => {},
-        _ = terminate => {},
+        _ = ctrl_c => info!("received Ctrl+C signal, shutting down"),
+        _ = terminate => info!("received SIGTERM signal, shutting down"),
     }
 
-    token.cancel();
+    if let Some(token) = token {
+        token.cancel();
+    }
 }

@@ -50,7 +50,7 @@ async fn main() -> Result<(), MainError> {
 
     // Cancellation token shared across tasks; listener cancels on SIGINT/SIGTERM.
     let shutdown_token = CancellationToken::new();
-    let signal_handle = tokio::spawn(shutdown_listener(shutdown_token.clone()));
+    let signal_handle = tokio::spawn(shutdown_listener(Some(shutdown_token.clone())));
 
     let axum_handle = tokio::spawn(run_health_server(
         Arc::clone(&last_attempted_update),
