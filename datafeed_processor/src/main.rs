@@ -86,7 +86,7 @@ async fn run_health_server(last_processed_datafeed: Arc<RwLock<Option<DateTime<U
 }
 
 async fn health_check(State(state): State<AxumState>) -> impl IntoResponse {
-    let last_processed_datafeed = state.last_processed_datafeed.read().clone();
+    let last_processed_datafeed = *state.last_processed_datafeed.read();
     let msg = if let Some(timestamp) = last_processed_datafeed {
         format!("Last processed datafeed updated_at: {timestamp}")
     } else {

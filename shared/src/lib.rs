@@ -4,6 +4,8 @@ use crate::error::ConfigError;
 use figment::Figment;
 use figment::providers::{Env, Format, Toml};
 use serde::Deserialize;
+use tokio::signal;
+use tokio_util::sync::CancellationToken;
 
 pub const DATAFEED_QUEUE_NAME: &str = "vnas_stats";
 pub const ENV_VAR_PREFIX: &str = "VNAS_STATS__";
@@ -47,4 +49,21 @@ pub mod error {
         #[error(transparent)]
         Db(#[from] sqlx::Error),
     }
+}
+
+pub async fn shutdown_listener(token: CancellationToken) {
+    let ctrl_c = signal::ctrl_c();
+    #[cfg(unix)]
+    let terminate = signal::unix::signal(signal::unix::SignalKind::terminate())
+        .expect("failed to install SIGTERM handler")
+        .recv();
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+
+    token.cancel();
 }

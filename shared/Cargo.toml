@@ -10,6 +10,8 @@ figment.workspace = true
 thiserror.workspace = true
 sqlx.workspace = true
 tracing.workspace = true
+tokio-util.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 reqwest.workspace = true

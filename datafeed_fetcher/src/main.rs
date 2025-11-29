@@ -1,7 +1,7 @@
 #[warn(clippy::pedantic)]
 mod error;
 
-use crate::error::{EnqueueError, FetchError};
+use crate::error::{EnqueueError, FetchError, MainError};
 use axum::Router;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -10,22 +10,23 @@ use axum::routing::get;
 use chrono::{DateTime, TimeDelta, Utc};
 use parking_lot::RwLock;
 use serde_json::Value;
-use shared::PostgresConfig;
 use shared::error::InitializationError;
 use shared::load_config;
 use shared::vnas::datafeed::{VnasEnvironment, datafeed_url};
+use shared::{PostgresConfig, shutdown_listener};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Pool, Postgres};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::time::sleep;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
 #[tokio::main]
-async fn main() -> Result<(), InitializationError> {
+async fn main() -> Result<(), MainError> {
     let subscriber = tracing_subscriber::fmt()
         .compact()
         .with_file(true)
@@ -33,7 +34,7 @@ async fn main() -> Result<(), InitializationError> {
         .with_env_filter(EnvFilter::from_default_env())
         .finish();
 
-    tracing::subscriber::set_global_default(subscriber)?;
+    tracing::subscriber::set_global_default(subscriber).map_err(InitializationError::Tracing)?;
 
     // Set up config
     let config = load_config().unwrap_or_else(|e| {
@@ -47,30 +48,39 @@ async fn main() -> Result<(), InitializationError> {
     let last_successful_update = Arc::new(RwLock::new(None));
     let last_error = Arc::new(RwLock::new(None));
 
-    let last_attempted_update_clone = Arc::clone(&last_attempted_update);
-    let last_successful_update_clone = Arc::clone(&last_successful_update);
-    let last_error_clone = Arc::clone(&last_error);
+    // Cancellation token shared across tasks; listener cancels on SIGINT/SIGTERM.
+    let shutdown_token = CancellationToken::new();
+    let signal_handle = tokio::spawn(shutdown_listener(shutdown_token.clone()));
 
-    let axum_handle = tokio::spawn(async move {
-        run_health_server(
-            last_attempted_update_clone,
-            last_successful_update_clone,
-            last_error_clone,
-        )
-        .await
-    });
+    let axum_handle = tokio::spawn(run_health_server(
+        Arc::clone(&last_attempted_update),
+        Arc::clone(&last_successful_update),
+        Arc::clone(&last_error),
+        shutdown_token.clone(),
+    ));
 
-    let fetcher_handle = tokio::spawn(async move {
-        fetcher_loop(
-            db_pool,
-            last_attempted_update,
-            last_successful_update,
-            last_error,
-        )
-        .await
-    });
+    let fetcher_handle = tokio::spawn(fetcher_loop(
+        db_pool,
+        last_attempted_update,
+        last_successful_update,
+        last_error,
+        shutdown_token.clone(),
+    ));
 
-    let _ = tokio::join!(axum_handle, fetcher_handle);
+    tokio::select! {
+        res = axum_handle => {
+            shutdown_token.cancel();
+            res??;
+        }
+        res = fetcher_handle => {
+            shutdown_token.cancel();
+            res??;
+        }
+        res = signal_handle => {
+            shutdown_token.cancel();
+            res?;
+        }
+    }
 
     Ok(())
 }
@@ -80,7 +90,8 @@ async fn fetcher_loop(
     last_attempted_update: Arc<RwLock<Option<DateTime<Utc>>>>,
     last_successful_update: Arc<RwLock<Option<DateTime<Utc>>>>,
     last_error: Arc<RwLock<Option<EnqueueError>>>,
-) {
+    shutdown: CancellationToken,
+) -> Result<(), EnqueueError> {
     // Default reqwest client
     let http_client = reqwest::Client::new();
 
@@ -91,7 +102,13 @@ async fn fetcher_loop(
         if initial_loop {
             initial_loop = false;
         } else {
-            sleep(Duration::from_secs(15)).await;
+            tokio::select! {
+                _ = sleep(Duration::from_secs(15)) => {},
+                _ = shutdown.cancelled() => {
+                    info!("shutdown requested, exiting fetcher loop");
+                    break;
+                }
+            }
         }
 
         let now = Utc::now();
@@ -128,7 +145,15 @@ async fn fetcher_loop(
             *last_successful_update.write() = Some(now);
             debug!("enqueued datafeed into Postgres queue");
         }
+
+        // If shutdown was requested during processing, break after finishing the iteration.
+        if shutdown.is_cancelled() {
+            info!("shutdown requested, fetcher loop exiting after current iteration");
+            break;
+        }
     }
+
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -142,7 +167,8 @@ async fn run_health_server(
     last_attempted_update: Arc<RwLock<Option<DateTime<Utc>>>>,
     last_successful_update: Arc<RwLock<Option<DateTime<Utc>>>>,
     last_error: Arc<RwLock<Option<EnqueueError>>>,
-) {
+    shutdown: CancellationToken,
+) -> Result<(), std::io::Error> {
     info!("starting axum health server");
     let app = Router::new()
         .route("/health", get(health_check))
@@ -151,8 +177,13 @@ async fn run_health_server(
             last_attempted_update,
             last_error,
         });
-    let listener = TcpListener::bind("127.0.0.1:3000").await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    let listener = TcpListener::bind("127.0.0.1:3000").await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            shutdown.cancelled().await;
+        })
+        .await?;
+    Ok(())
 }
 
 async fn health_check(State(state): State<AxumState>) -> impl IntoResponse {

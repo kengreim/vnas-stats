@@ -16,3 +16,4 @@ sqlx.workspace = true
 uuid.workspace = true
 parking_lot.workspace = true
 axum.workspace = true
+tokio-util.workspace = true

@@ -19,3 +19,15 @@ pub enum EnqueueError {
     #[error("datafeed fetch error: {0}")]
     Fetch(#[from] FetchError),
 }
+
+#[derive(Debug, Error)]
+pub enum MainError {
+    #[error(transparent)]
+    Init(#[from] shared::error::InitializationError),
+    #[error(transparent)]
+    Enqueue(#[from] EnqueueError),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Join(#[from] tokio::task::JoinError),
+}
