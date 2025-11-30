@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use tracing::{Level, debug, event_enabled, warn};
 use uuid::Uuid;
 
-pub async fn log_session_changes<'e, E>(
+pub async fn debug_log_sessions_changes<'e, E>(
     executor: &mut E,
     controller_actions: &[ControllerAction],
     active_callsign_ids: &HashSet<Uuid>,
@@ -61,7 +61,7 @@ where
     }
 
     if closed_controllers.is_empty() {
-        debug!("no closed sessions");
+        debug!("no closed controller sessions");
     } else {
         debug!(controllers = ?closed_controllers, "closed controller sessions");
     }

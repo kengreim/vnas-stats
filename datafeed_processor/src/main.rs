@@ -16,7 +16,7 @@ use crate::helpers::{
     ensure_position_session, finalize_callsign_sessions, finalize_position_sessions,
     load_active_state, login_times_match, parse_controller_parts,
 };
-use crate::logging::log_session_changes;
+use crate::logging::debug_log_sessions_changes;
 use axum::Router;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -495,7 +495,7 @@ async fn process_datafeed_payload(
             ControllerAction::Close { .. } => {}
         }
     }
-    debug!("completed processing controller sessions");
+    trace!("completed processing controller sessions");
 
     let closed_callsign_ids = finalize_callsign_sessions(
         &mut tx,
@@ -504,7 +504,7 @@ async fn process_datafeed_payload(
         datafeed.updated_at,
     )
     .await?;
-    debug!("completed processing callsign sessions");
+    trace!("completed processing callsign sessions");
 
     let closed_position_ids = finalize_position_sessions(
         &mut tx,
@@ -513,11 +513,11 @@ async fn process_datafeed_payload(
         datafeed.updated_at,
     )
     .await?;
-    debug!("completed processing position sessions");
+    trace!("completed processing position sessions");
 
     // Note: this function will only return if log level is DEBUG or TRACE, otherwise it returns
     // immediately
-    log_session_changes(
+    debug_log_sessions_changes(
         tx.as_mut(),
         &controller_actions,
         &active_callsign_ids,
