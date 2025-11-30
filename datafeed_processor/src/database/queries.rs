@@ -294,6 +294,55 @@ where
     .map_err(QueryError::from)
 }
 
+pub async fn fetch_callsign_session_details<'e, E>(
+    executor: E,
+    ids: &[Uuid],
+) -> Result<Vec<(Uuid, String, String)>, QueryError>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    sqlx::query_as::<_, (Uuid, String, String)>(
+        r"
+        SELECT id, prefix, suffix
+        FROM callsign_sessions
+        WHERE id = ANY($1)
+        ",
+    )
+    .bind(ids)
+    .fetch_all(executor)
+    .await
+    .map_err(QueryError::from)
+}
+
+pub async fn fetch_position_session_details<'e, E>(
+    executor: E,
+    ids: &[Uuid],
+) -> Result<Vec<(Uuid, String, String)>, QueryError>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    sqlx::query_as::<_, (Uuid, String, String)>(
+        r"
+        SELECT s.id, s.position_id, p.name
+        FROM position_sessions s
+        JOIN facility_positions p ON p.id = s.position_id
+        WHERE s.id = ANY($1)
+        ",
+    )
+    .bind(ids)
+    .fetch_all(executor)
+    .await
+    .map_err(QueryError::from)
+}
+
 pub async fn get_or_create_callsign_session<E>(
     executor: &mut E,
     prefix: &str,

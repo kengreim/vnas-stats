@@ -81,7 +81,7 @@ pub async fn load_active_state(
         .map(|s| {
             state
                 .active_callsign_sessions_map
-                .insert((s.prefix.clone(), s.suffix.clone()), s.id);
+                .insert((s.prefix, s.suffix), s.id);
             s.id
         })
         .collect();
@@ -137,6 +137,8 @@ pub enum ControllerAction {
     Close {
         session_id: Uuid,
         cid: i32,
+        callsign_session_id: Uuid,
+        position_session_id: Uuid,
         connected_callsign: String,
         reason: ControllerCloseReason,
     },
@@ -206,7 +208,7 @@ pub async fn finalize_callsign_sessions(
     active_callsign_sessions: &HashSet<Uuid>,
     active_callsign_ids: &HashSet<Uuid>,
     ended_at: DateTime<Utc>,
-) -> Result<(), QueryError> {
+) -> Result<Vec<Uuid>, QueryError> {
     let conn = tx.as_mut();
     let to_close_callsign: Vec<Uuid> = active_callsign_sessions
         .difference(active_callsign_ids)
@@ -222,7 +224,8 @@ pub async fn finalize_callsign_sessions(
     if !to_close_callsign.is_empty() {
         complete_callsign_sessions(conn, &to_close_callsign, ended_at).await?;
     }
-    Ok(())
+
+    Ok(to_close_callsign)
 }
 
 pub async fn finalize_position_sessions(
@@ -230,7 +233,7 @@ pub async fn finalize_position_sessions(
     active_position_sessions: &HashMap<String, Uuid>,
     active_position_ids: &HashSet<String>,
     ended_at: DateTime<Utc>,
-) -> Result<(), QueryError> {
+) -> Result<Vec<Uuid>, QueryError> {
     let conn = tx.as_mut();
     let to_close_positions: Vec<Uuid> = active_position_sessions
         .iter()
@@ -252,5 +255,6 @@ pub async fn finalize_position_sessions(
     if !to_close_positions.is_empty() {
         complete_position_sessions(conn, &to_close_positions, ended_at).await?;
     }
-    Ok(())
+
+    Ok(to_close_positions)
 }

@@ -2,6 +2,7 @@
 mod database;
 mod error;
 mod helpers;
+mod logging;
 
 use crate::database::queries::{
     archive_and_delete_queued_datafeed, complete_controller_sessions, fetch_datafeed_batch,
@@ -15,6 +16,7 @@ use crate::helpers::{
     ensure_position_session, finalize_callsign_sessions, finalize_position_sessions,
     load_active_state, login_times_match, parse_controller_parts,
 };
+use crate::logging::log_session_changes;
 use axum::Router;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -349,6 +351,8 @@ async fn process_datafeed_payload(
                     controller_actions.push(ControllerAction::Close {
                         session_id: existing.controller_session_id,
                         cid,
+                        callsign_session_id: existing.callsign_session_id,
+                        position_session_id: existing.position_session_id,
                         connected_callsign: existing.connected_callsign,
                         reason: ControllerCloseReason::ReconnectedOrChangedPosition,
                     });
@@ -380,6 +384,8 @@ async fn process_datafeed_payload(
             controller_actions.push(ControllerAction::Close {
                 session_id: existing.controller_session_id,
                 cid,
+                callsign_session_id: existing.callsign_session_id,
+                position_session_id: existing.position_session_id,
                 connected_callsign: existing.connected_callsign,
                 reason: ControllerCloseReason::DeactivatedPosition,
             });
@@ -397,6 +403,8 @@ async fn process_datafeed_payload(
         ControllerAction::Close {
             session_id: state.controller_session_id,
             cid: *cid,
+            callsign_session_id: state.callsign_session_id,
+            position_session_id: state.position_session_id,
             connected_callsign: state.connected_callsign.clone(),
             reason: ControllerCloseReason::MissingFromDatafeed,
         }
@@ -487,68 +495,35 @@ async fn process_datafeed_payload(
             ControllerAction::Close { .. } => {}
         }
     }
+    debug!("completed processing controller sessions");
 
-    // Only need to run these additional allocations if we are logging at DEBUG level
-    if event_enabled!(Level::DEBUG) {
-        debug!("completed processing controller sessions");
-
-        let created = controller_actions
-            .iter()
-            .filter_map(|a| {
-                if let ControllerAction::CreateNew {
-                    controller, cid, ..
-                } = a
-                {
-                    Some((cid, controller.vatsim_data.callsign.clone()))
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
-
-        let closed = controller_actions
-            .iter()
-            .filter_map(|a| {
-                if let ControllerAction::Close {
-                    cid,
-                    connected_callsign,
-                    reason,
-                    ..
-                } = a
-                {
-                    Some((cid, connected_callsign, reason))
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
-
-        if created.is_empty() {
-            debug!("no new controller sessions");
-        } else {
-            debug!(controllers = ?created, "created new controller sessions");
-        }
-
-        if closed.is_empty() {
-            debug!("no closed sessions");
-        } else {
-            debug!(controllers = ?closed, "closed controller sessions");
-        }
-    }
-
-    finalize_callsign_sessions(
+    let closed_callsign_ids = finalize_callsign_sessions(
         &mut tx,
         existing_active_callsign_sessions,
         &active_callsign_ids,
         datafeed.updated_at,
     )
     .await?;
+    debug!("completed processing callsign sessions");
 
-    finalize_position_sessions(
+    let closed_position_ids = finalize_position_sessions(
         &mut tx,
         existing_active_position_sessions,
         &active_position_ids,
         datafeed.updated_at,
+    )
+    .await?;
+    debug!("completed processing position sessions");
+
+    // Note: this function will only return if log level is DEBUG or TRACE, otherwise it returns
+    // immediately
+    log_session_changes(
+        tx.as_mut(),
+        &controller_actions,
+        &active_callsign_ids,
+        &active_position_ids,
+        &closed_callsign_ids,
+        &closed_position_ids,
     )
     .await?;
 
