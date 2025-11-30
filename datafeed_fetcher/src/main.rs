@@ -49,16 +49,16 @@ async fn main() -> Result<(), MainError> {
 
     // Cancellation token shared across tasks; listener cancels on SIGINT/SIGTERM.
     let shutdown_token = CancellationToken::new();
-    let signal_handle = tokio::spawn(shutdown_listener(Some(shutdown_token.clone())));
+    let mut signal_handle = tokio::spawn(shutdown_listener(Some(shutdown_token.clone())));
 
-    let axum_handle = tokio::spawn(run_health_server(
+    let mut axum_handle = tokio::spawn(run_health_server(
         Arc::clone(&last_attempted_update),
         Arc::clone(&last_successful_update),
         Arc::clone(&last_error),
         shutdown_token.clone(),
     ));
 
-    let fetcher_handle = tokio::spawn(fetcher_loop(
+    let mut fetcher_handle = tokio::spawn(fetcher_loop(
         db_pool,
         last_attempted_update,
         last_successful_update,
@@ -66,23 +66,91 @@ async fn main() -> Result<(), MainError> {
         shutdown_token.clone(),
     ));
 
-    // If any of the tasks terminate, propagate a graceful cancellation and return the initial error
+    let mut first_err: Option<MainError> = None;
+    let mut axum_done = false;
+    let mut fetcher_done = false;
+
     tokio::select! {
-        res = axum_handle => {
+        res = &mut axum_handle => {
+            info!("axum task completed first, propagating cancellation token to other tasks");
+            axum_done = true;
             shutdown_token.cancel();
-            res??;
+            match res {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    warn!(error = ?e, "axum task completed due to error");
+                    first_err.get_or_insert(e.into());
+                }
+                Err(join) => {
+                    warn!(error = ?join, "axum task completed due to error");
+                    first_err.get_or_insert(join.into());
+                }
+            }
         }
-        res = fetcher_handle => {
+        res = &mut fetcher_handle => {
+            info!("fetcher task completed first, propagating cancellation token to other tasks");
+            fetcher_done = true;
             shutdown_token.cancel();
-            res??;
+            match res {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    warn!(error = ?e, "fetcher task completed due to error");
+                    first_err.get_or_insert(e.into());
+                }
+                Err(join) => {
+                    warn!(error = ?join, "fetcher task completed due to error");
+                    first_err.get_or_insert(join.into());
+                }
+            }
         }
-        res = signal_handle => {
+        res = &mut signal_handle => {
+            info!("SIGINT/SIGTERM listener task completed first, propagating cancellation token to other tasks");
             shutdown_token.cancel();
-            res?;
+            if let Err(join) = res {
+                warn!(error = ?join, "error with SIGINT/SIGTERM listener task");
+                first_err.get_or_insert(join.into());
+            }
         }
     }
 
-    Ok(())
+    if !axum_done {
+        info!("awaiting completion of axum task");
+        match axum_handle.await {
+            Ok(Ok(())) => {
+                info!("axum task completed successfully");
+            }
+            Ok(Err(e)) => {
+                info!(error = ?e, "axum task completed with error");
+                first_err.get_or_insert(e.into());
+            }
+            Err(join) => {
+                info!(error = ?join, "axum task completed with error");
+                first_err.get_or_insert(join.into());
+            }
+        }
+    }
+    if !fetcher_done {
+        info!("awaiting completion of fetcher task");
+        match fetcher_handle.await {
+            Ok(Ok(())) => {
+                info!("fetcher task completed successfully");
+            }
+            Ok(Err(e)) => {
+                info!(error = ?e, "fetcher task completed with error");
+                first_err.get_or_insert(e.into());
+            }
+            Err(join) => {
+                info!(error = ?join, "fetcher task completed with error");
+                first_err.get_or_insert(join.into());
+            }
+        }
+    }
+
+    if let Some(err) = first_err {
+        Err(err)
+    } else {
+        Ok(())
+    }
 }
 
 async fn fetcher_loop(
@@ -179,9 +247,7 @@ async fn run_health_server(
         });
     let listener = TcpListener::bind("127.0.0.1:3000").await?;
     axum::serve(listener, app)
-        .with_graceful_shutdown(async move {
-            shutdown.cancelled().await;
-        })
+        .with_graceful_shutdown(shutdown.cancelled_owned())
         .await?;
     Ok(())
 }
@@ -196,19 +262,19 @@ async fn health_check(State(state): State<AxumState>) -> impl IntoResponse {
     };
 
     if last_attempted_update.is_none() || last_successful_update.is_none() {
-        if let Some(last_attempted_update) = last_attempted_update {
-            return (
+        return if let Some(last_attempted_update) = last_attempted_update {
+            (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!(
                     "Datafeed has not been successfully updated. Last attempted update: {last_attempted_update}. Last error: {last_error}"
                 ),
-            );
+            )
         } else {
-            return (
+            (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "No attempted or successful datafeed updates".to_string(),
-            );
-        }
+            )
+        };
     }
 
     // We can safely unwrap here because we checked is_none above

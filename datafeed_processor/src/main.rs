@@ -4,7 +4,7 @@ mod error;
 mod helpers;
 
 use crate::database::queries::{
-    archive_and_delete_datafeed, complete_controller_sessions, fetch_datafeed_batch,
+    archive_and_delete_queued_datafeed, complete_controller_sessions, fetch_datafeed_batch,
     insert_controller_session, update_active_controller_session, update_callsign_session_last_seen,
     update_position_session_last_seen,
 };
@@ -60,34 +60,102 @@ async fn main() -> Result<(), ProcessorMainError> {
     let shutdown_token = CancellationToken::new();
 
     // Spawn listener, axum (health check endpoint) and datafeed processor tasks
-    let signal_handle = tokio::spawn(shutdown_listener(Some(shutdown_token.clone())));
-    let axum_handle = tokio::spawn(run_health_server(
+    let mut signal_handle = tokio::spawn(shutdown_listener(Some(shutdown_token.clone())));
+    let mut axum_handle = tokio::spawn(run_health_server(
         Arc::clone(&last_processed_datafeed),
         shutdown_token.clone(),
     ));
-    let processor_handle = tokio::spawn(datafeed_processing_loop(
+    let mut processor_handle = tokio::spawn(run_datafeed_processing_loop(
         db_pool,
         Arc::clone(&last_processed_datafeed),
         shutdown_token.clone(),
     ));
 
-    // If any of the tasks terminate, propagate a graceful cancellation and return the initial error
+    let mut first_err: Option<ProcessorMainError> = None;
+    let mut axum_done = false;
+    let mut processor_done = false;
+
     tokio::select! {
-        res = axum_handle => {
+        res = &mut axum_handle => {
+            info!("axum task completed first, propagating cancellation token to other tasks");
+            axum_done = true;
             shutdown_token.cancel();
-            res??;
+            match res {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                     warn!(error = ?e, "axum task completed due to error");
+                    first_err.get_or_insert(e.into());
+                }
+                Err(join) => {
+                     warn!(error = ?join, "axum task completed due to error");
+                    first_err.get_or_insert(join.into());
+                }
+            }
         }
-        res = processor_handle => {
+        res = &mut processor_handle => {
+            info!("processor task completed first, propagating cancellation token to other tasks");
+            processor_done = true;
             shutdown_token.cancel();
-            res??;
+            match res {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    warn!(error = ?e, "processor task completed due to error");
+                    first_err.get_or_insert(e);
+                }
+                Err(join) => {
+                    warn!(error = ?join, "processor task completed due to error");
+                    first_err.get_or_insert(join.into());
+                }
+            }
         }
-        res = signal_handle => {
+        res = &mut signal_handle => {
+            info!("SIGINT/SIGTERM listener task completed first, propagating cancellation token to other tasks");
             shutdown_token.cancel();
-            res?;
+            if let Err(join) = res {
+                warn!(error = ?join, "error with SIGINT/SIGTERM listener task");
+                first_err.get_or_insert(join.into());
+            }
         }
     }
 
-    Ok(())
+    if !axum_done {
+        info!("awaiting completion of axum task");
+        match axum_handle.await {
+            Ok(Ok(())) => {
+                info!("axum task completed successfully");
+            }
+            Ok(Err(e)) => {
+                info!(error = ?e, "axum task completed with error");
+                first_err.get_or_insert(e.into());
+            }
+            Err(join) => {
+                info!(error = ?join, "axum task completed with error");
+                first_err.get_or_insert(join.into());
+            }
+        }
+    }
+    if !processor_done {
+        info!("awaiting completion of processor task");
+        match processor_handle.await {
+            Ok(Ok(())) => {
+                info!("processor task completed successfully");
+            }
+            Ok(Err(e)) => {
+                info!(error = ?e, "processor task completed with error");
+                first_err.get_or_insert(e);
+            }
+            Err(join) => {
+                info!(error = ?join, "processor task completed with error");
+                first_err.get_or_insert(join.into());
+            }
+        }
+    }
+
+    if let Some(err) = first_err {
+        Err(err)
+    } else {
+        Ok(())
+    }
 }
 
 #[derive(Clone)]
@@ -107,9 +175,7 @@ async fn run_health_server(
         });
     let listener = TcpListener::bind("127.0.0.1:3000").await.unwrap();
     axum::serve(listener, app)
-        .with_graceful_shutdown(async move {
-            shutdown.cancelled().await;
-        })
+        .with_graceful_shutdown(shutdown.cancelled_owned())
         .await?;
 
     Ok(())
@@ -126,7 +192,7 @@ async fn health_check(State(state): State<AxumState>) -> impl IntoResponse {
     (StatusCode::OK, msg)
 }
 
-async fn datafeed_processing_loop(
+async fn run_datafeed_processing_loop(
     db_pool: Pool<Postgres>,
     last_processed_datafeed: Arc<RwLock<Option<DateTime<Utc>>>>,
     shutdown: CancellationToken,
@@ -151,36 +217,23 @@ async fn datafeed_processing_loop(
                 info!("shutdown requested, exiting processor loop");
                 break;
             }
-            _ = datafeed_msg_recv(&mut listener, &db_pool, last_processed_datafeed) => {
-
+            recv = listener.recv() => {
+                match recv {
+                    Ok(notification) => {
+                        debug!(payload = notification.payload(), "received datafeed notification");
+                        // Process pending datafeeds; if this fails, propagate the error after finishing this payload.
+                        process_pending_datafeeds(&db_pool, &last_processed_datafeed, 10).await?;
+                    }
+                    Err(e) => {
+                        warn!(error = ?e, "error receiving Postgres notification");
+                        sleep(Duration::from_secs(1)).await;
+                    }
+                }
             }
         }
     }
 
     Ok(())
-}
-
-async fn datafeed_msg_recv(
-    listener: &mut PgListener,
-    db_pool: &Pool<Postgres>,
-    last_processed_datafeed: Arc<RwLock<Option<DateTime<Utc>>>>,
-) {
-    match listener.recv().await {
-        Ok(notification) => {
-            debug!(
-                payload = notification.payload(),
-                "received datafeed notification"
-            );
-            // If this fails, we end all processing by throwing error out of main
-            // because any datafeeds that failed to process will always remain in the queue
-            // and will cause future batches to fail until fixed
-            process_pending_datafeeds(&db_pool, &last_processed_datafeed, 10).await?;
-        }
-        Err(e) => {
-            warn!(error = ?e, "error receiving Postgres notification");
-            sleep(Duration::from_secs(1)).await;
-        }
-    }
 }
 
 async fn process_pending_datafeeds(
@@ -213,7 +266,7 @@ async fn process_pending_datafeeds(
                 return Err(e.into());
             }
 
-            archive_and_delete_datafeed(&mut *tx, &message, Utc::now()).await?;
+            archive_and_delete_queued_datafeed(&mut *tx, &message, Utc::now()).await?;
             latest = Some(datafeed_root.updated_at);
         }
 

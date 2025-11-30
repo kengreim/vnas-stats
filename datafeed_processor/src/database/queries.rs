@@ -99,7 +99,7 @@ where
         .map_err(QueryError::from)
 }
 
-pub async fn archive_and_delete_datafeed<'e, E>(
+pub async fn archive_and_delete_queued_datafeed<'e, E>(
     executor: &mut E,
     message: &QueuedDatafeed,
     processed_at: DateTime<Utc>,
