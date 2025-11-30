@@ -121,16 +121,16 @@ pub async fn debug_log_sessions_changes(
     log_callsign_sessions(
         &mut tx,
         &callsign_stayed.iter().copied().collect(),
-        "no callsign sessions stayed active",
-        "controller sessions closed while callsign session stayed active",
+        "",
+        "callsign sessions remain active although controller sessions closed",
     )
     .await?;
 
     log_position_sessions(
         &mut tx,
         &position_stayed.iter().copied().collect(),
-        "no position sessions stayed active",
-        "controller sessions closed while position session stayed active",
+        "",
+        "position sessions remain active although controller sessions closed",
     )
     .await?;
 
@@ -158,7 +158,7 @@ async fn log_callsign_sessions(
                 Vec::default()
             });
 
-    if details.is_empty() {
+    if details.is_empty() && !empty_message.is_empty() {
         debug!("{}", empty_message);
     } else {
         debug!(callsigns = ?details, "{}", log_message);
@@ -186,7 +186,7 @@ async fn log_position_sessions(
                 Vec::default()
             });
 
-    if details.is_empty() {
+    if details.is_empty() && !empty_message.is_empty() {
         debug!("{}", empty_message);
     } else {
         debug!(positions = ?details, "{}", log_message);

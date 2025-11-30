@@ -1,5 +1,6 @@
 use crate::database::models::{
-    ActiveSessionKey, CallsignSession, PositionSession, QueuedDatafeed, UserRating,
+    ActiveSessionKey, CallsignSession, PositionSession, PositionSessionDetails, QueuedDatafeed,
+    UserRating,
 };
 use chrono::{DateTime, Utc};
 use shared::vnas::datafeed::Controller;
@@ -321,7 +322,7 @@ where
 pub async fn fetch_position_session_details<'e, E>(
     executor: E,
     ids: &[Uuid],
-) -> Result<Vec<(Uuid, String, Option<String>)>, QueryError>
+) -> Result<Vec<PositionSessionDetails>, QueryError>
 where
     E: Executor<'e, Database = Postgres>,
 {
@@ -329,9 +330,9 @@ where
         return Ok(Vec::new());
     }
 
-    sqlx::query_as::<_, (Uuid, String, Option<String>)>(
+    sqlx::query_as::<_, PositionSessionDetails>(
         r"
-        SELECT s.id, s.position_id, p.name
+        SELECT s.id, s.position_id, p.name AS position_name, p.callsign AS position_callsign
         FROM position_sessions s
         LEFT JOIN facility_positions p ON p.id = s.position_id
         WHERE s.id = ANY($1)

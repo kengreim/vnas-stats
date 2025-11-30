@@ -69,6 +69,14 @@ pub struct PositionSession {
     pub created_at: DateTime<Utc>,
 }
 
+#[derive(Clone, Debug, sqlx::FromRow)]
+pub struct PositionSessionDetails {
+    pub id: Uuid,
+    pub position_id: String,
+    pub position_name: Option<String>,
+    pub position_callsign: Option<String>,
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd, sqlx::Type, Deserialize, Serialize)]
 #[sqlx(type_name = "user_rating", rename_all = "lowercase")]
 pub enum UserRating {
