@@ -497,7 +497,7 @@ async fn process_datafeed_payload(
     }
     trace!("completed processing controller sessions");
 
-    let closed_callsign_ids = finalize_callsign_sessions(
+    let closed_callsign_session_ids = finalize_callsign_sessions(
         &mut tx,
         existing_active_callsign_sessions,
         &active_callsign_ids,
@@ -506,7 +506,7 @@ async fn process_datafeed_payload(
     .await?;
     trace!("completed processing callsign sessions");
 
-    let closed_position_ids = finalize_position_sessions(
+    let closed_position_session_ids = finalize_position_sessions(
         &mut tx,
         existing_active_position_sessions,
         &active_position_ids,
@@ -522,10 +522,8 @@ async fn process_datafeed_payload(
     debug_log_sessions_changes(
         pool,
         &controller_actions,
-        &active_callsign_ids,
-        &active_position_ids,
-        &closed_callsign_ids,
-        &closed_position_ids,
+        &closed_callsign_session_ids,
+        &closed_position_session_ids,
     )
     .await?;
 

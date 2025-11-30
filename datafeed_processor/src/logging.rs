@@ -2,8 +2,8 @@ use crate::database::queries::{
     QueryError, fetch_callsign_session_details, fetch_position_session_details,
 };
 use crate::helpers::ControllerAction;
-use sqlx::Postgres;
 use sqlx::Pool;
+use sqlx::Postgres;
 use std::collections::HashSet;
 use tracing::{Level, debug, event_enabled, warn};
 use uuid::Uuid;
@@ -11,16 +11,16 @@ use uuid::Uuid;
 pub async fn debug_log_sessions_changes(
     pool: &Pool<Postgres>,
     controller_actions: &[ControllerAction],
-    active_callsign_ids: &HashSet<Uuid>,
-    active_position_ids: &HashSet<String>,
-    closed_callsign_ids: &[Uuid],
-    closed_position_ids: &[Uuid],
+    closed_callsign_session_ids: &[Uuid],
+    closed_position_session_ids: &[Uuid],
 ) -> Result<(), QueryError> {
     if !event_enabled!(Level::DEBUG) {
         return Ok(());
     }
 
     let mut tx = pool.begin().await?;
+    let closed_callsign_set: HashSet<Uuid> = closed_callsign_session_ids.iter().copied().collect();
+    let closed_position_set: HashSet<Uuid> = closed_position_session_ids.iter().copied().collect();
 
     let created_controllers = controller_actions
         .iter()
@@ -65,19 +65,21 @@ pub async fn debug_log_sessions_changes(
         debug!(controllers = ?closed_controllers, "closed controller sessions");
     }
 
-    let closed_callsigns_details = fetch_callsign_session_details(&mut *tx, closed_callsign_ids)
-        .await
-        .unwrap_or_else(|e| {
-            warn!(error = ?e, "failed to fetch closed callsign sessions details");
-            Vec::default()
-        });
+    let closed_callsigns_details =
+        fetch_callsign_session_details(&mut *tx, closed_callsign_session_ids)
+            .await
+            .unwrap_or_else(|e| {
+                warn!(error = ?e, "failed to fetch closed callsign sessions details");
+                Vec::default()
+            });
 
-    let closed_positions_details = fetch_position_session_details(&mut *tx, closed_position_ids)
-        .await
-        .unwrap_or_else(|e| {
-            warn!(error = ?e, "failed to fetch closed position sessions details");
-            Vec::default()
-        });
+    let closed_positions_details =
+        fetch_position_session_details(&mut *tx, closed_position_session_ids)
+            .await
+            .unwrap_or_else(|e| {
+                warn!(error = ?e, "failed to fetch closed position sessions details");
+                Vec::default()
+            });
 
     if closed_callsigns_details.is_empty() {
         debug!("no closed callsign sessions");
@@ -101,10 +103,11 @@ pub async fn debug_log_sessions_changes(
             ..
         } = action
         {
-            if active_callsign_ids.contains(callsign_session_id) {
+            if !closed_callsign_set.contains(callsign_session_id) {
                 callsign_stayed.push(*callsign_session_id);
             }
-            if active_position_ids.contains(&position_session_id.to_string()) {
+            // A position session stayed active if it was not part of the closed set.
+            if !closed_position_set.contains(position_session_id) {
                 position_stayed.push(*position_session_id);
             }
         }
