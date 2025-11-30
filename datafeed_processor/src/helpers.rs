@@ -156,16 +156,16 @@ pub async fn ensure_callsign_session(
     active_callsign_sessions_map: &mut HashMap<(String, String), Uuid>,
     callsign_key: &(String, String),
     seen_at: DateTime<Utc>,
-) -> Result<Uuid, QueryError> {
+) -> Result<(Uuid, bool), QueryError> {
     if let Some(id) = active_callsign_sessions_map.get(callsign_key).copied() {
         update_callsign_session_last_seen(tx.as_mut(), id, seen_at).await?;
-        return Ok(id);
+        return Ok((id, false));
     }
 
     let id = get_or_create_callsign_session(tx.as_mut(), &callsign_key.0, &callsign_key.1, seen_at)
         .await?;
     active_callsign_sessions_map.insert(callsign_key.clone(), id);
-    Ok(id)
+    Ok((id, true))
 }
 
 pub async fn ensure_position_session(
@@ -173,15 +173,15 @@ pub async fn ensure_position_session(
     active_position_sessions: &mut HashMap<String, Uuid>,
     position_id: &str,
     seen_at: DateTime<Utc>,
-) -> Result<Uuid, QueryError> {
+) -> Result<(Uuid, bool), QueryError> {
     if let Some(id) = active_position_sessions.get(position_id).copied() {
         update_position_session_last_seen(tx.as_mut(), id, seen_at).await?;
-        return Ok(id);
+        return Ok((id, false));
     }
 
     let id = get_or_create_position_session(tx.as_mut(), position_id, seen_at).await?;
     active_position_sessions.insert(position_id.to_string(), id);
-    Ok(id)
+    Ok((id, true))
 }
 //
 // pub async fn finalize_controller_sessions(

@@ -321,7 +321,7 @@ where
 pub async fn fetch_position_session_details<'e, E>(
     executor: E,
     ids: &[Uuid],
-) -> Result<Vec<(Uuid, String, String)>, QueryError>
+) -> Result<Vec<(Uuid, String, Option<String>)>, QueryError>
 where
     E: Executor<'e, Database = Postgres>,
 {
@@ -329,11 +329,11 @@ where
         return Ok(Vec::new());
     }
 
-    sqlx::query_as::<_, (Uuid, String, String)>(
+    sqlx::query_as::<_, (Uuid, String, Option<String>)>(
         r"
         SELECT s.id, s.position_id, p.name
         FROM position_sessions s
-        JOIN facility_positions p ON p.id = s.position_id
+        LEFT JOIN facility_positions p ON p.id = s.position_id
         WHERE s.id = ANY($1)
         ",
     )

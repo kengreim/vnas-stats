@@ -294,6 +294,8 @@ async fn process_datafeed_payload(
     } = &mut existing_state;
     let mut active_callsign_ids: HashSet<Uuid> = HashSet::new();
     let mut active_position_ids: HashSet<String> = HashSet::new();
+    let mut new_callsign_session_ids: HashSet<Uuid> = HashSet::new();
+    let mut new_position_session_ids: HashSet<Uuid> = HashSet::new();
     let mut controller_actions: Vec<ControllerAction> = Vec::new();
 
     // First pass: only handle Controller-Position Sessions (i.e., a session with the unique combination
@@ -465,20 +467,28 @@ async fn process_datafeed_payload(
                 position_id,
                 cid,
             } => {
-                let callsign_session_id = ensure_callsign_session(
+                let (callsign_session_id, callsign_created) = ensure_callsign_session(
                     &mut tx,
                     existing_active_callsign_sessions_map,
                     callsign_key,
                     datafeed.updated_at,
                 )
                 .await?;
-                let position_session_id = ensure_position_session(
+                if callsign_created {
+                    new_callsign_session_ids.insert(callsign_session_id);
+                }
+
+                let (position_session_id, position_created) = ensure_position_session(
                     &mut tx,
                     existing_active_position_sessions,
                     position_id,
                     datafeed.updated_at,
                 )
                 .await?;
+                if position_created {
+                    new_position_session_ids.insert(position_session_id);
+                }
+
                 insert_controller_session(
                     tx.as_mut(),
                     controller,
@@ -522,6 +532,8 @@ async fn process_datafeed_payload(
     debug_log_sessions_changes(
         pool,
         &controller_actions,
+        &new_callsign_session_ids,
+        &new_position_session_ids,
         &closed_callsign_session_ids,
         &closed_position_session_ids,
     )
