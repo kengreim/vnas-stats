@@ -515,10 +515,12 @@ async fn process_datafeed_payload(
     .await?;
     trace!("completed processing position sessions");
 
+    tx.commit().await?;
+
     // Note: this function will only return if log level is DEBUG or TRACE, otherwise it returns
     // immediately
     debug_log_sessions_changes(
-        tx.as_mut(),
+        pool,
         &controller_actions,
         &active_callsign_ids,
         &active_position_ids,
@@ -527,6 +529,5 @@ async fn process_datafeed_payload(
     )
     .await?;
 
-    tx.commit().await?;
     Ok(())
 }
