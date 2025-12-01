@@ -43,6 +43,12 @@ async fn main() -> Result<(), MainError> {
 
     let db_pool = initialize_db(&config.postgres).await?;
 
+    let interval_seconds = if let Some(fetcher_config) = config.fetcher {
+        fetcher_config.interval_seconds
+    } else {
+        15
+    };
+
     let last_attempted_update = Arc::new(RwLock::new(None));
     let last_successful_update = Arc::new(RwLock::new(None));
     let last_error = Arc::new(RwLock::new(None));
@@ -60,6 +66,7 @@ async fn main() -> Result<(), MainError> {
 
     let mut fetcher_handle = tokio::spawn(fetcher_loop(
         db_pool,
+        interval_seconds,
         last_attempted_update,
         last_successful_update,
         last_error,
@@ -155,6 +162,7 @@ async fn main() -> Result<(), MainError> {
 
 async fn fetcher_loop(
     db_pool: Pool<Postgres>,
+    interval_seconds: u64,
     last_attempted_update: Arc<RwLock<Option<DateTime<Utc>>>>,
     last_successful_update: Arc<RwLock<Option<DateTime<Utc>>>>,
     last_error: Arc<RwLock<Option<EnqueueError>>>,
@@ -170,7 +178,7 @@ async fn fetcher_loop(
             initial_loop = false;
         } else {
             tokio::select! {
-                _ = sleep(Duration::from_secs(15)) => {},
+                _ = sleep(Duration::from_secs(interval_seconds)) => {},
                 _ = shutdown.cancelled() => {
                     info!("shutdown requested, exiting fetcher loop");
                     break;
