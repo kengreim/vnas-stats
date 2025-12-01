@@ -100,7 +100,7 @@ create table datafeed_queue
 create index idx_datafeed_queue_created_at on datafeed_queue (created_at);
 create index idx_datafeed_queue_updated_at on datafeed_queue (updated_at);
 
-create table datafeed_archive
+create table datafeed_payloads
 (
     id                  uuid        not null,
     updated_at          timestamptz not null,
@@ -108,12 +108,25 @@ create table datafeed_archive
     original_size_bytes integer     not null,
     compression_algo    text        not null default 'zstd',
     created_at          timestamptz not null,
-    processed_at        timestamptz not null default now(),
-    constraint datafeed_archive_pkey primary key (id)
+    constraint datafeed_payloads_pkey primary key (id),
+    constraint uq_datafeed_payloads_updated unique (updated_at)
 );
 
 -- We already store this compressed; avoid an extra TOAST compression pass.
-alter table datafeed_archive
+alter table datafeed_payloads
     alter column payload_compressed set storage external;
 
-create index idx_datafeed_archive_processed_at on datafeed_archive (processed_at);
+create index idx_datafeed_payloads_updated_at on datafeed_payloads (updated_at);
+
+create table datafeed_messages
+(
+    id           uuid        not null,
+    queue_id     uuid        not null,
+    payload_id   uuid        not null,
+    enqueued_at  timestamptz not null,
+    processed_at timestamptz not null default now(),
+    constraint datafeed_messages_pkey primary key (id),
+    constraint datafeed_messages_payload_fk foreign key (payload_id) references datafeed_payloads (id)
+);
+
+create index idx_datafeed_messages_processed_at on datafeed_messages (processed_at);

@@ -17,11 +17,17 @@ pub const SETTINGS_FILE: &str = "Settings.toml";
 #[derive(Debug, Deserialize)]
 pub struct Config {
     pub postgres: PostgresConfig,
+    pub fetcher: Option<FetcherConfig>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct PostgresConfig {
     pub connection_string: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FetcherConfig {
+    pub interval_seconds: u64,
 }
 
 pub fn load_config() -> Result<Config, ConfigError> {

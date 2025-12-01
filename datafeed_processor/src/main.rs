@@ -5,9 +5,9 @@ mod helpers;
 mod logging;
 
 use crate::database::queries::{
-    archive_and_delete_queued_datafeed, complete_controller_sessions, fetch_datafeed_batch,
-    insert_controller_session, update_active_controller_session, update_callsign_session_last_seen,
-    update_position_session_last_seen,
+    complete_controller_sessions, delete_queued_datafeed, fetch_datafeed_batch,
+    insert_controller_session, insert_datafeed_message, update_active_controller_session,
+    update_callsign_session_last_seen, update_position_session_last_seen, upsert_datafeed_payload,
 };
 use crate::error::{BacklogProcessingError, PayloadProcessingError, ProcessorMainError};
 use crate::helpers::ControllerCloseReason;
@@ -222,7 +222,7 @@ async fn run_datafeed_processing_loop(
             recv = listener.recv() => {
                 match recv {
                     Ok(notification) => {
-                        debug!(payload = notification.payload(), "received datafeed notification");
+                        trace!(payload = notification.payload(), "received datafeed notification");
                         // Process pending datafeeds; if this fails, propagate the error after finishing this payload.
                         process_pending_datafeeds(&db_pool, &last_processed_datafeed, 10).await?;
                     }
@@ -263,12 +263,31 @@ async fn process_pending_datafeeds(
                 }
             };
 
-            if let Err(e) = process_datafeed_payload(pool, &datafeed_root).await {
-                tx.rollback().await?;
-                return Err(e.into());
+            // Upsert payload; if not inserted (already seen), skip session processing.
+            let (payload_id, new_payload) = upsert_datafeed_payload(tx.as_mut(), &message).await?;
+
+            if new_payload {
+                debug!(updated_at = ?datafeed_root.updated_at, "new datafeed update received");
+                if let Err(e) = process_datafeed_payload(pool, &datafeed_root).await {
+                    tx.rollback().await?;
+                    return Err(e.into());
+                }
+            } else {
+                trace!(
+                    updated_at = ?datafeed_root.updated_at,
+                    "skipping processing; datafeed already processed"
+                );
             }
 
-            archive_and_delete_queued_datafeed(&mut *tx, &message, Utc::now()).await?;
+            insert_datafeed_message(
+                tx.as_mut(),
+                message.id,
+                payload_id,
+                message.created_at,
+                Utc::now(),
+            )
+            .await?;
+            delete_queued_datafeed(tx.as_mut(), message.id).await?;
             latest = Some(datafeed_root.updated_at);
         }
 

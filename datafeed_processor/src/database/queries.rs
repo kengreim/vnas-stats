@@ -5,6 +5,7 @@ use crate::database::models::{
 use chrono::{DateTime, Utc};
 use shared::vnas::datafeed::Controller;
 use sqlx::{Executor, Postgres};
+use std::num::TryFromIntError;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -16,6 +17,8 @@ pub enum QueryError {
     Serialize(#[from] serde_json::Error),
     #[error("payload compression failed: {0}")]
     Compress(#[from] std::io::Error),
+    #[error("payload too large: {0}")]
+    PayloadTooLarge(#[from] TryFromIntError),
 }
 
 // pub async fn get_all_controller_sessions(
@@ -49,68 +52,91 @@ where
     .map_err(QueryError::from)
 }
 
-async fn archive_datafeed<'e, E>(
-    executor: E,
+/// Returns a tuple `(Uuid, bool)` where the Uuid is the payload primary key in the
+/// database and the bool indicates whether a new row was inserted
+pub async fn upsert_datafeed_payload<'e, E>(
+    executor: &mut E,
     message: &QueuedDatafeed,
-    processed_at: DateTime<Utc>,
-) -> Result<(), QueryError>
+) -> Result<(Uuid, bool), QueryError>
 where
-    E: Executor<'e, Database = Postgres>,
+    for<'c> &'c mut E: Executor<'c, Database = Postgres>,
 {
     let payload_bytes = serde_json::to_vec(&message.payload)?;
-    let original_size = payload_bytes.len() as i32;
+    let original_size = i32::try_from(payload_bytes.len()).map_err(QueryError::PayloadTooLarge)?;
     let payload_compressed = zstd::encode_all(payload_bytes.as_slice(), 3)?;
 
-    sqlx::query(
+    if let Some(id) = sqlx::query_scalar::<_, Uuid>(
         r"
-        INSERT INTO datafeed_archive (
+        INSERT INTO datafeed_payloads (
             id,
             updated_at,
             payload_compressed,
             original_size_bytes,
             compression_algo,
-            created_at,
-            processed_at
+            created_at
         )
-        VALUES ($1, $2, $3, $4, 'zstd', $5, $6)
+        VALUES ($1, $2, $3, $4, 'zstd', $5)
+        ON CONFLICT (updated_at) DO NOTHING
+        RETURNING id
         ",
     )
-    .bind(message.id)
+    .bind(Uuid::now_v7())
     .bind(message.updated_at)
     .bind(payload_compressed)
     .bind(original_size)
     .bind(message.created_at)
-    .bind(processed_at)
-    .execute(executor)
-    .await
-    .map_err(QueryError::from)?;
+    .fetch_optional(&mut *executor)
+    .await?
+    {
+        return Ok((id, true));
+    }
 
-    Ok(())
+    let existing_id =
+        sqlx::query_scalar::<_, Uuid>("SELECT id FROM datafeed_payloads WHERE updated_at = $1")
+            .bind(message.updated_at)
+            .fetch_one(&mut *executor)
+            .await?;
+
+    Ok((existing_id, false))
 }
 
-async fn delete_queued_datafeed<'e, E>(executor: E, id: Uuid) -> Result<(), QueryError>
-where
-    E: Executor<'e, Database = Postgres>,
-{
-    sqlx::query("DELETE FROM datafeed_queue WHERE id = $1")
-        .bind(id)
-        .execute(executor)
-        .await
-        .map(|_| ())
-        .map_err(QueryError::from)
-}
-
-pub async fn archive_and_delete_queued_datafeed<'e, E>(
+pub async fn insert_datafeed_message<'e, E>(
     executor: &mut E,
-    message: &QueuedDatafeed,
+    queue_id: Uuid,
+    payload_id: Uuid,
+    enqueued_at: DateTime<Utc>,
     processed_at: DateTime<Utc>,
 ) -> Result<(), QueryError>
 where
     for<'c> &'c mut E: Executor<'c, Database = Postgres>,
 {
-    archive_datafeed(&mut *executor, message, processed_at).await?;
-    delete_queued_datafeed(&mut *executor, message.id).await?;
-    Ok(())
+    sqlx::query(
+        r"
+        INSERT INTO datafeed_messages (id, queue_id, payload_id, enqueued_at, processed_at)
+        VALUES ($1, $2, $3, $4, $5)
+        ",
+    )
+    .bind(Uuid::now_v7())
+    .bind(queue_id)
+    .bind(payload_id)
+    .bind(enqueued_at)
+    .bind(processed_at)
+    .execute(&mut *executor)
+    .await
+    .map(|_| ())
+    .map_err(QueryError::from)
+}
+
+pub async fn delete_queued_datafeed<'e, E>(executor: &mut E, id: Uuid) -> Result<(), QueryError>
+where
+    for<'c> &'c mut E: Executor<'c, Database = Postgres>,
+{
+    sqlx::query("DELETE FROM datafeed_queue WHERE id = $1")
+        .bind(id)
+        .execute(&mut *executor)
+        .await
+        .map(|_| ())
+        .map_err(QueryError::from)
 }
 
 pub async fn get_active_controller_session_keys<'e, E>(

@@ -43,6 +43,12 @@ async fn main() -> Result<(), MainError> {
 
     let db_pool = initialize_db(&config.postgres).await?;
 
+    let interval_seconds = if let Some(fetcher_config) = config.fetcher {
+        fetcher_config.interval_seconds
+    } else {
+        15
+    };
+
     let last_attempted_update = Arc::new(RwLock::new(None));
     let last_successful_update = Arc::new(RwLock::new(None));
     let last_error = Arc::new(RwLock::new(None));
@@ -60,6 +66,7 @@ async fn main() -> Result<(), MainError> {
 
     let mut fetcher_handle = tokio::spawn(fetcher_loop(
         db_pool,
+        interval_seconds,
         last_attempted_update,
         last_successful_update,
         last_error,
@@ -155,6 +162,7 @@ async fn main() -> Result<(), MainError> {
 
 async fn fetcher_loop(
     db_pool: Pool<Postgres>,
+    interval_seconds: u64,
     last_attempted_update: Arc<RwLock<Option<DateTime<Utc>>>>,
     last_successful_update: Arc<RwLock<Option<DateTime<Utc>>>>,
     last_error: Arc<RwLock<Option<EnqueueError>>>,
@@ -165,13 +173,12 @@ async fn fetcher_loop(
 
     info!("initialized Datafeed Fetcher");
     let mut initial_loop = true;
-    let mut previous_timestamp: Option<DateTime<Utc>> = None;
     loop {
         if initial_loop {
             initial_loop = false;
         } else {
             tokio::select! {
-                _ = sleep(Duration::from_secs(15)) => {},
+                _ = sleep(Duration::from_secs(interval_seconds)) => {},
                 _ = shutdown.cancelled() => {
                     info!("shutdown requested, exiting fetcher loop");
                     break;
@@ -181,7 +188,7 @@ async fn fetcher_loop(
 
         let now = Utc::now();
         *last_attempted_update.write() = Some(now);
-        let (payload, current_timestamp) = match fetch_datafeed(&http_client).await {
+        let (payload, datafeed_updated_at) = match fetch_datafeed(&http_client).await {
             Ok((p, t)) => (p, t),
             Err(e) => {
                 warn!(error = ?e, "failed to fetch and deserialize datafeed");
@@ -189,23 +196,9 @@ async fn fetcher_loop(
                 continue;
             }
         };
+        info!(updated_at = ?datafeed_updated_at, "fetched datafeed");
 
-        // If we found a duplicate, continue the loop which will sleep at the top
-        if let Some(previous_timestamp) = previous_timestamp
-            && previous_timestamp == current_timestamp
-        {
-            info!(
-                timestamp = ?previous_timestamp,
-                "found no change to datafeed"
-            );
-            *last_successful_update.write() = Some(now);
-            continue;
-        }
-
-        info!(timestamp = ?current_timestamp, "found updated datafeed");
-        previous_timestamp = Some(current_timestamp);
-
-        if let Err(e) = enqueue_datafeed(&db_pool, payload, current_timestamp).await {
+        if let Err(e) = enqueue_datafeed(&db_pool, payload, datafeed_updated_at).await {
             warn!(error = ?e, "could not enqueue datafeed into Postgres");
             *last_error.write() = Some(e);
             continue;
