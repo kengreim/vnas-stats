@@ -55,9 +55,9 @@ pub async fn debug_log_sessions_changes(
         .collect::<Vec<_>>();
 
     if created_controllers.is_empty() {
-        debug!("no new controller sessions");
+        debug!("no opened controller sessions");
     } else {
-        debug!(controllers = ?created_controllers, "created new controller sessions");
+        debug!(controllers = ?created_controllers, "opened controller sessions");
     }
 
     if closed_controllers.is_empty() {
