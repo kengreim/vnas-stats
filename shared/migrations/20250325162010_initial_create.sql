@@ -54,39 +54,62 @@ create unique index uq_position_sessions_active_position
 create index idx_position_sessions_active on position_sessions (is_active);
 create index idx_position_sessions_last_seen on position_sessions (last_seen);
 
+-- Logical controller sessions (may span multiple network connects).
 create table controller_sessions
 (
-    id                   uuid                 not null,
-    login_time           timestamptz          not null,
-    start_time           timestamptz          not null,
-    end_time             timestamptz,
-    duration             interval,
-    last_seen            timestamptz          not null default now(),
-    is_active            bool                 not null,
-    is_observer          bool                 not null,
-    cid                  integer              not null,
-    name                 text                 not null,
-    user_rating          user_rating          not null,
-    requested_rating     user_rating          not null,
-    connected_callsign   text                 not null,
-    primary_position_id  text                 not null,
-    callsign_session_id  uuid                 not null,
-    position_session_id  uuid                 not null,
+    id                  uuid        not null,
+    start_time          timestamptz not null,
+    end_time            timestamptz,
+    duration            interval,
+    last_seen           timestamptz not null default now(),
+    is_active           bool        not null,
+    is_observer         bool        not null,
+    cid                 integer     not null,
+    name                text        not null,
+    user_rating         user_rating not null,
+    requested_rating    user_rating not null,
+    connected_callsign  text        not null,
+    primary_position_id text        not null,
+    callsign_session_id uuid        not null,
+    position_session_id uuid        not null,
+    created_at          timestamptz not null default now(),
     constraint controller_sessions_pkey primary key (id),
     constraint controller_sessions_callsign_session_fk foreign key (callsign_session_id) references callsign_sessions (id),
     constraint controller_sessions_position_session_fk foreign key (position_session_id) references position_sessions (id)
 );
 
--- Only one active session per controller ID at a time.
 create unique index uq_controller_sessions_active_cid
     on controller_sessions (cid)
     where is_active = true;
 
 create index idx_controller_sessions_active on controller_sessions (is_active, cid);
 create index idx_controller_sessions_end_time on controller_sessions (end_time) where is_active = false;
-create index idx_controller_sessions_login_time on controller_sessions (login_time);
 create index idx_controller_sessions_callsign_session_id on controller_sessions (callsign_session_id);
 create index idx_controller_sessions_position_session_id on controller_sessions (position_session_id);
+
+-- Network-level sessions, representing a unique connection to vNAS
+create table controller_network_sessions
+(
+    id                   uuid                 not null,
+    controller_session_id uuid                not null,
+    login_time           timestamptz          not null,
+    start_time           timestamptz          not null,
+    end_time             timestamptz,
+    duration             interval,
+    last_seen            timestamptz          not null default now(),
+    is_active            bool                 not null,
+    connected_callsign   text                 not null,
+    primary_position_id  text                 not null,
+    created_at           timestamptz          not null default now(),
+    constraint controller_network_sessions_pkey primary key (id),
+    constraint controller_network_sessions_controller_fk foreign key (controller_session_id) references controller_sessions (id)
+);
+
+create index idx_controller_network_sessions_active on controller_network_sessions (is_active);
+create index idx_controller_network_sessions_login_time on controller_network_sessions (login_time);
+create unique index uq_controller_network_active_session
+    on controller_network_sessions (controller_session_id)
+    where is_active = true;
 
 create table datafeed_queue
 (
