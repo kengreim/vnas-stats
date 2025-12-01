@@ -54,18 +54,13 @@ pub async fn debug_log_sessions_changes(
         })
         .collect::<Vec<_>>();
 
+    // Log all the opened controller, callsign and position sessions
+
     if created_controllers.is_empty() {
         debug!("no opened controller sessions");
     } else {
         debug!(controllers = ?created_controllers, "opened controller sessions");
     }
-
-    if closed_controllers.is_empty() {
-        debug!("no closed controller sessions");
-    } else {
-        debug!(controllers = ?closed_controllers, "closed controller sessions");
-    }
-
     log_callsign_sessions(
         &mut tx,
         new_callsign_session_ids,
@@ -73,15 +68,6 @@ pub async fn debug_log_sessions_changes(
         "opened callsign sessions",
     )
     .await?;
-
-    log_callsign_sessions(
-        &mut tx,
-        &closed_callsign_set,
-        "no closed callsign sessions",
-        "closed callsign sessions",
-    )
-    .await?;
-
     log_position_sessions(
         &mut tx,
         new_position_session_ids,
@@ -90,6 +76,19 @@ pub async fn debug_log_sessions_changes(
     )
     .await?;
 
+    // Log all the closed controller, sallsign and position sessions
+    if closed_controllers.is_empty() {
+        debug!("no closed controller sessions");
+    } else {
+        debug!(controllers = ?closed_controllers, "closed controller sessions");
+    }
+    log_callsign_sessions(
+        &mut tx,
+        &closed_callsign_set,
+        "no closed callsign sessions",
+        "closed callsign sessions",
+    )
+    .await?;
     log_position_sessions(
         &mut tx,
         &closed_position_set,
@@ -98,7 +97,8 @@ pub async fn debug_log_sessions_changes(
     )
     .await?;
 
-    // Log sessions that stayed active while a controller closed.
+    // Log callsign and position sessions that remained open even though an associated controller
+    // session closed
     let mut callsign_stayed: Vec<_> = Vec::new();
     let mut position_stayed: Vec<_> = Vec::new();
     for action in controller_actions {
