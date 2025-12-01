@@ -145,8 +145,10 @@ async fn log_callsign_sessions(
     empty_message: &str,
     log_message: &str,
 ) -> Result<(), QueryError> {
-    if ids.is_empty() && !empty_message.is_empty() {
-        debug!("{}", empty_message);
+    if ids.is_empty() {
+        if !empty_message.is_empty() {
+            debug!("{}", empty_message);
+        }
         return Ok(());
     }
 
@@ -174,7 +176,9 @@ async fn log_position_sessions(
     log_message: &str,
 ) -> Result<(), QueryError> {
     if ids.is_empty() && !empty_message.is_empty() {
-        debug!("{}", empty_message);
+        if !empty_message.is_empty() {
+            debug!("{}", empty_message);
+        }
         return Ok(());
     }
 
