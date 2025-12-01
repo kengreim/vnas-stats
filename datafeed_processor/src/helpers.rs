@@ -17,6 +17,7 @@ type Callsign<'a> = (&'a str, Option<&'a str>, &'a str);
 #[derive(Debug, Clone)]
 pub struct ActiveControllerState {
     pub controller_session_id: Uuid,
+    pub network_session_id: Uuid,
     pub login_time: DateTime<Utc>,
     pub callsign_session_id: Uuid,
     pub position_id: String,
@@ -65,7 +66,8 @@ pub async fn load_active_state(
             (
                 session.cid,
                 ActiveControllerState {
-                    controller_session_id: session.id,
+                    controller_session_id: session.controller_session_id,
+                    network_session_id: session.network_session_id,
                     login_time: session.login_time,
                     callsign_session_id: session.callsign_session_id,
                     position_id: session.primary_position_id.clone(),
@@ -123,7 +125,8 @@ pub fn parse_controller_parts(
 #[derive(Clone, Debug)]
 pub enum ControllerAction {
     UpdateExisting {
-        session_id: Uuid,
+        controller_session_id: Uuid,
+        network_session_id: Uuid,
         controller: Controller,
         callsign_session_id: Uuid,
         position_session_id: Uuid,
@@ -135,7 +138,7 @@ pub enum ControllerAction {
         cid: i32,
     },
     Close {
-        session_id: Uuid,
+        controller_session_id: Uuid,
         cid: i32,
         callsign_session_id: Uuid,
         position_session_id: Uuid,

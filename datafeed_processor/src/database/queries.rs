@@ -49,58 +49,85 @@ where
     .map_err(QueryError::from)
 }
 
-async fn archive_datafeed<'e, E>(
-    executor: E,
+async fn upsert_datafeed_payload<'e, E>(
+    executor: &mut E,
     message: &QueuedDatafeed,
-    processed_at: DateTime<Utc>,
-) -> Result<(), QueryError>
+) -> Result<Uuid, QueryError>
 where
-    E: Executor<'e, Database = Postgres>,
+    for<'c> &'c mut E: Executor<'c, Database = Postgres>,
 {
     let payload_bytes = serde_json::to_vec(&message.payload)?;
     let original_size = payload_bytes.len() as i32;
     let payload_compressed = zstd::encode_all(payload_bytes.as_slice(), 3)?;
 
-    sqlx::query(
+    let payload_id = sqlx::query_scalar::<_, Uuid>(
         r"
-        INSERT INTO datafeed_archive (
+        INSERT INTO datafeed_payloads (
             id,
             updated_at,
             payload_compressed,
             original_size_bytes,
             compression_algo,
-            created_at,
-            processed_at
+            created_at
         )
-        VALUES ($1, $2, $3, $4, 'zstd', $5, $6)
+        VALUES ($1, $2, $3, $4, 'zstd', $5)
+        ON CONFLICT (updated_at) DO UPDATE
+        SET payload_compressed = EXCLUDED.payload_compressed,
+            original_size_bytes = EXCLUDED.original_size_bytes,
+            compression_algo = EXCLUDED.compression_algo,
+            created_at = EXCLUDED.created_at
+        RETURNING id
         ",
     )
-    .bind(message.id)
+    .bind(Uuid::now_v7())
     .bind(message.updated_at)
     .bind(payload_compressed)
     .bind(original_size)
     .bind(message.created_at)
-    .bind(processed_at)
-    .execute(executor)
-    .await
-    .map_err(QueryError::from)?;
+    .fetch_one(&mut *executor)
+    .await?;
 
-    Ok(())
+    Ok(payload_id)
 }
 
-async fn delete_queued_datafeed<'e, E>(executor: E, id: Uuid) -> Result<(), QueryError>
+async fn insert_datafeed_message<'e, E>(
+    executor: &mut E,
+    queue_id: Uuid,
+    payload_id: Uuid,
+    received_at: DateTime<Utc>,
+) -> Result<(), QueryError>
 where
-    E: Executor<'e, Database = Postgres>,
+    for<'c> &'c mut E: Executor<'c, Database = Postgres>,
+{
+    sqlx::query(
+        r"
+        INSERT INTO datafeed_messages (id, queue_id, payload_id, received_at)
+        VALUES ($1, $2, $3, $4)
+        ",
+    )
+    .bind(Uuid::now_v7())
+    .bind(queue_id)
+    .bind(payload_id)
+    .bind(received_at)
+    .execute(&mut *executor)
+    .await
+    .map(|_| ())
+    .map_err(QueryError::from)
+}
+
+async fn delete_queued_datafeed<'e, E>(executor: &mut E, id: Uuid) -> Result<(), QueryError>
+where
+    for<'c> &'c mut E: Executor<'c, Database = Postgres>,
 {
     sqlx::query("DELETE FROM datafeed_queue WHERE id = $1")
         .bind(id)
-        .execute(executor)
+        .execute(&mut *executor)
         .await
         .map(|_| ())
         .map_err(QueryError::from)
 }
 
-pub async fn archive_and_delete_queued_datafeed<'e, E>(
+pub async fn record_datafeed_processing<'e, E>(
     executor: &mut E,
     message: &QueuedDatafeed,
     processed_at: DateTime<Utc>,
@@ -108,8 +135,9 @@ pub async fn archive_and_delete_queued_datafeed<'e, E>(
 where
     for<'c> &'c mut E: Executor<'c, Database = Postgres>,
 {
-    archive_datafeed(&mut *executor, message, processed_at).await?;
-    delete_queued_datafeed(&mut *executor, message.id).await?;
+    let payload_id = upsert_datafeed_payload(executor, message).await?;
+    insert_datafeed_message(executor, message.id, payload_id, processed_at).await?;
+    delete_queued_datafeed(executor, message.id).await?;
     Ok(())
 }
 
@@ -121,9 +149,19 @@ where
 {
     sqlx::query_as::<_, ActiveSessionKey>(
         r"
-        SELECT id, cid, login_time, connected_callsign, callsign_session_id, primary_position_id, position_session_id
-        FROM controller_sessions
-        WHERE is_active = TRUE
+        SELECT
+            cs.id as controller_session_id,
+            cns.id as network_session_id,
+            cs.cid,
+            cns.login_time,
+            cs.connected_callsign,
+            cs.callsign_session_id,
+            cs.primary_position_id,
+            cs.position_session_id
+        FROM controller_sessions cs
+        JOIN controller_network_sessions cns
+            ON cns.controller_session_id = cs.id
+        WHERE cs.is_active = TRUE AND cns.is_active = TRUE
         ",
     )
     .fetch_all(executor)
@@ -131,26 +169,25 @@ where
     .map_err(QueryError::from)
 }
 
-pub async fn insert_controller_session<'e, E>(
-    executor: E,
+pub async fn insert_controller_session<E>(
+    executor: &mut E,
     controller: &Controller,
     cid: i32,
     seen_at: DateTime<Utc>,
     callsign_session_id: Uuid,
     position_session_id: Uuid,
-) -> Result<Uuid, QueryError>
+) -> Result<(Uuid, Uuid), QueryError>
 where
-    E: Executor<'e, Database = Postgres>,
+    for<'c> &'c mut E: Executor<'c, Database = Postgres>,
 {
     let user_rating: UserRating = controller.vatsim_data.user_rating.into();
     let requested_rating: UserRating = controller.vatsim_data.requested_rating.into();
-    let id = Uuid::now_v7();
+    let controller_session_id = Uuid::now_v7();
 
     sqlx::query(
         r"
         INSERT INTO controller_sessions (
             id,
-            login_time,
             start_time,
             end_time,
             duration,
@@ -167,12 +204,11 @@ where
             position_session_id
         )
         VALUES (
-            $1, $2, $3, NULL, NULL, $4, TRUE, $5, $6, $7, $8, $9, $10, $11, $12, $13
+            $1, $2, NULL, NULL, $3, TRUE, $4, $5, $6, $7, $8, $9, $10, $11, $12
         )
         ",
     )
-    .bind(id)
-    .bind(controller.login_time)
+    .bind(controller_session_id)
     .bind(seen_at)
     .bind(seen_at)
     .bind(controller.is_observer)
@@ -184,21 +220,53 @@ where
     .bind(controller.primary_position_id.clone())
     .bind(callsign_session_id)
     .bind(position_session_id)
-    .execute(executor)
+    .execute(&mut *executor)
     .await
     .map_err(QueryError::from)?;
 
-    Ok(id)
+    let network_session_id = Uuid::now_v7();
+    sqlx::query(
+        r"
+        INSERT INTO controller_network_sessions (
+            id,
+            controller_session_id,
+            login_time,
+            start_time,
+            end_time,
+            duration,
+            last_seen,
+            is_active,
+            connected_callsign,
+            primary_position_id
+        )
+        VALUES (
+            $1, $2, $3, $4, NULL, NULL, $5, TRUE, $6, $7
+        )
+        ",
+    )
+    .bind(network_session_id)
+    .bind(controller_session_id)
+    .bind(controller.login_time)
+    .bind(seen_at)
+    .bind(seen_at)
+    .bind(controller.vatsim_data.callsign.clone())
+    .bind(controller.primary_position_id.clone())
+    .execute(&mut *executor)
+    .await
+    .map_err(QueryError::from)?;
+
+    Ok((controller_session_id, network_session_id))
 }
 
-pub async fn update_active_controller_session<'e, E>(
-    executor: E,
-    session_id: Uuid,
+pub async fn update_active_controller_session<E>(
+    executor: &mut E,
+    controller_session_id: Uuid,
+    network_session_id: Uuid,
     controller: &Controller,
     seen_at: DateTime<Utc>,
 ) -> Result<(), QueryError>
 where
-    E: Executor<'e, Database = Postgres>,
+    for<'c> &'c mut E: Executor<'c, Database = Postgres>,
 {
     let user_rating: UserRating = controller.vatsim_data.user_rating.into();
     let requested_rating: UserRating = controller.vatsim_data.requested_rating.into();
@@ -217,7 +285,7 @@ where
         WHERE id = $1
         ",
     )
-    .bind(session_id)
+    .bind(controller_session_id)
     .bind(seen_at)
     .bind(controller.is_observer)
     .bind(controller.vatsim_data.real_name.clone())
@@ -225,19 +293,36 @@ where
     .bind(requested_rating)
     .bind(controller.vatsim_data.callsign.clone())
     .bind(controller.primary_position_id.clone())
-    .execute(executor)
+    .execute(&mut *executor)
+    .await
+    .map_err(QueryError::from)?;
+
+    sqlx::query(
+        r"
+        UPDATE controller_network_sessions
+        SET last_seen = $2,
+            connected_callsign = $3,
+            primary_position_id = $4
+        WHERE id = $1
+        ",
+    )
+    .bind(network_session_id)
+    .bind(seen_at)
+    .bind(controller.vatsim_data.callsign.clone())
+    .bind(controller.primary_position_id.clone())
+    .execute(&mut *executor)
     .await
     .map(|_| ())
     .map_err(QueryError::from)
 }
 
-pub async fn complete_controller_sessions<'e, E>(
-    executor: E,
-    ids: &[Uuid],
+pub async fn complete_controller_sessions<E>(
+    executor: &mut E,
+    controller_session_ids: &[Uuid],
     ended_at: DateTime<Utc>,
 ) -> Result<u64, QueryError>
 where
-    E: Executor<'e, Database = Postgres>,
+    for<'c> &'c mut E: Executor<'c, Database = Postgres>,
 {
     let result = sqlx::query(
         r"
@@ -250,9 +335,26 @@ where
         WHERE id = ANY($1)
         ",
     )
-    .bind(ids)
+    .bind(controller_session_ids)
     .bind(ended_at)
-    .execute(executor)
+    .execute(&mut *executor)
+    .await
+    .map_err(QueryError::from)?;
+
+    sqlx::query(
+        r"
+        UPDATE controller_network_sessions
+        SET
+            is_active = FALSE,
+            end_time = $2,
+            duration = $2 - start_time,
+            last_seen = $2
+        WHERE controller_session_id = ANY($1)
+        ",
+    )
+    .bind(controller_session_ids)
+    .bind(ended_at)
+    .execute(&mut *executor)
     .await
     .map_err(QueryError::from)?;
 

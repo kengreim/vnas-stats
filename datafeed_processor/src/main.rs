@@ -5,7 +5,7 @@ mod helpers;
 mod logging;
 
 use crate::database::queries::{
-    archive_and_delete_queued_datafeed, complete_controller_sessions, fetch_datafeed_batch,
+    complete_controller_sessions, fetch_datafeed_batch, record_datafeed_processing,
     insert_controller_session, update_active_controller_session, update_callsign_session_last_seen,
     update_position_session_last_seen,
 };
@@ -268,7 +268,7 @@ async fn process_pending_datafeeds(
                 return Err(e.into());
             }
 
-            archive_and_delete_queued_datafeed(&mut *tx, &message, Utc::now()).await?;
+            record_datafeed_processing(&mut *tx, &message, Utc::now()).await?;
             latest = Some(datafeed_root.updated_at);
         }
 
@@ -335,7 +335,8 @@ async fn process_datafeed_payload(
                         "controller was previously tracked and has same login time, position_id and callsign"
                     );
                     controller_actions.push(ControllerAction::UpdateExisting {
-                        session_id: existing.controller_session_id,
+                        controller_session_id: existing.controller_session_id,
+                        network_session_id: existing.network_session_id,
                         controller: controller.clone(),
                         callsign_session_id: existing.callsign_session_id,
                         position_session_id: existing.position_session_id,
@@ -351,7 +352,7 @@ async fn process_datafeed_payload(
                         "one of position ID or login_time does not match existing values, closing existing controller session and starting new"
                     );
                     controller_actions.push(ControllerAction::Close {
-                        session_id: existing.controller_session_id,
+                        controller_session_id: existing.controller_session_id,
                         cid,
                         callsign_session_id: existing.callsign_session_id,
                         position_session_id: existing.position_session_id,
@@ -384,7 +385,7 @@ async fn process_datafeed_payload(
                 "tracked controller is still in the datafeed but no longer active, closing session"
             );
             controller_actions.push(ControllerAction::Close {
-                session_id: existing.controller_session_id,
+                controller_session_id: existing.controller_session_id,
                 cid,
                 callsign_session_id: existing.callsign_session_id,
                 position_session_id: existing.position_session_id,
@@ -403,7 +404,7 @@ async fn process_datafeed_payload(
 
     controller_actions.extend(existing_active_by_cid.iter_mut().map(|(cid, state)| {
         ControllerAction::Close {
-            session_id: state.controller_session_id,
+            controller_session_id: state.controller_session_id,
             cid: *cid,
             callsign_session_id: state.callsign_session_id,
             position_session_id: state.position_session_id,
@@ -416,7 +417,7 @@ async fn process_datafeed_payload(
     let close_controller_session_ids: Vec<Uuid> = controller_actions
         .iter()
         .filter_map(|action| match action {
-            ControllerAction::Close { session_id, .. } => Some(*session_id),
+            ControllerAction::Close { controller_session_id, .. } => Some(*controller_session_id),
             _ => None,
         })
         .collect();
@@ -434,7 +435,8 @@ async fn process_datafeed_payload(
     for action in &controller_actions {
         match action {
             ControllerAction::UpdateExisting {
-                session_id,
+                controller_session_id,
+                network_session_id,
                 controller,
                 callsign_session_id,
                 position_session_id,
@@ -453,7 +455,8 @@ async fn process_datafeed_payload(
                 .await?;
                 update_active_controller_session(
                     tx.as_mut(),
-                    *session_id,
+                    *controller_session_id,
+                    *network_session_id,
                     controller,
                     datafeed.updated_at,
                 )
@@ -489,7 +492,7 @@ async fn process_datafeed_payload(
                     new_position_session_ids.insert(position_session_id);
                 }
 
-                insert_controller_session(
+                let (_controller_session_id, _network_session_id) = insert_controller_session(
                     tx.as_mut(),
                     controller,
                     *cid,

@@ -165,7 +165,6 @@ async fn fetcher_loop(
 
     info!("initialized Datafeed Fetcher");
     let mut initial_loop = true;
-    let mut previous_timestamp: Option<DateTime<Utc>> = None;
     loop {
         if initial_loop {
             initial_loop = false;
@@ -181,7 +180,7 @@ async fn fetcher_loop(
 
         let now = Utc::now();
         *last_attempted_update.write() = Some(now);
-        let (payload, current_timestamp) = match fetch_datafeed(&http_client).await {
+        let (payload, datafeed_updated_at) = match fetch_datafeed(&http_client).await {
             Ok((p, t)) => (p, t),
             Err(e) => {
                 warn!(error = ?e, "failed to fetch and deserialize datafeed");
@@ -190,22 +189,9 @@ async fn fetcher_loop(
             }
         };
 
-        // If we found a duplicate, continue the loop which will sleep at the top
-        if let Some(previous_timestamp) = previous_timestamp
-            && previous_timestamp == current_timestamp
-        {
-            info!(
-                timestamp = ?previous_timestamp,
-                "found no change to datafeed"
-            );
-            *last_successful_update.write() = Some(now);
-            continue;
-        }
+        info!(updated_at = ?datafeed_updated_at, "fetched datafeed");
 
-        info!(timestamp = ?current_timestamp, "found updated datafeed");
-        previous_timestamp = Some(current_timestamp);
-
-        if let Err(e) = enqueue_datafeed(&db_pool, payload, current_timestamp).await {
+        if let Err(e) = enqueue_datafeed(&db_pool, payload, datafeed_updated_at).await {
             warn!(error = ?e, "could not enqueue datafeed into Postgres");
             *last_error.write() = Some(e);
             continue;
