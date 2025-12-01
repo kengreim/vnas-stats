@@ -74,19 +74,19 @@ pub async fn debug_log_sessions_changes(
     )
     .await?;
 
-    log_position_sessions(
-        &mut tx,
-        new_position_session_ids,
-        "no opened position sessions",
-        "opened position sessions",
-    )
-    .await?;
-
     log_callsign_sessions(
         &mut tx,
         &closed_callsign_set,
         "no closed callsign sessions",
         "closed callsign sessions",
+    )
+    .await?;
+
+    log_position_sessions(
+        &mut tx,
+        new_position_session_ids,
+        "no opened position sessions",
+        "opened position sessions",
     )
     .await?;
 
@@ -175,7 +175,7 @@ async fn log_position_sessions(
     empty_message: &str,
     log_message: &str,
 ) -> Result<(), QueryError> {
-    if ids.is_empty() && !empty_message.is_empty() {
+    if ids.is_empty() {
         if !empty_message.is_empty() {
             debug!("{}", empty_message);
         }
