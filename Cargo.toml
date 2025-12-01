@@ -1,5 +1,5 @@
 [workspace]
-members = ["datafeed_fetcher", "datafeed_processor", "shared", "artcc_updater"]
+members = ["datafeed_fetcher", "datafeed_processor", "shared", "artcc_updater", "data_api"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -13,7 +13,7 @@ figment = { version = "0.10.19", features = ["toml", "env"] }
 reqwest = { version = "0.12.24", features = ["json"] }
 sqlx = { version = "0.8.3", features = ["runtime-tokio", "tls-native-tls", "postgres", "migrate", "chrono", "uuid", "json"] }
 thiserror = "2.0.17"
-uuid = { version = "1.18.1", features = ["v7"] }
+uuid = { version = "1.18.1", features = ["v7", "serde"] }
 zstd = "0.13.3"
 axum = "0.8.7"
 parking_lot = "0.12.5"

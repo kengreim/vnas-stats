@@ -1,0 +1,15 @@
+[package]
+name = "data_api"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+axum = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+shared = { path = "../shared" }
+sqlx = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }

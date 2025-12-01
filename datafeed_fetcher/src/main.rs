@@ -40,6 +40,7 @@ async fn main() -> Result<(), MainError> {
         error!(error = ?e, "configuration could not be initialized");
         panic!("configuration could not be initialized");
     });
+    info!(config = ?config, "config loaded");
 
     let db_pool = initialize_db(&config.postgres).await?;
 
