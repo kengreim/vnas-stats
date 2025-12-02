@@ -12,7 +12,7 @@ use sqlx::{Pool, Postgres};
 use std::cmp;
 use std::collections::HashMap;
 
-#[derive(Serialize)]
+#[derive(Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct IronMicResponse {
     pub requested_at: DateTime<Utc>,
@@ -23,7 +23,7 @@ struct IronMicResponse {
     pub callsigns: Vec<CallsignDurationStats>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 struct CallsignDurationStats {
     pub prefix: String,
