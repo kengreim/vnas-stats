@@ -14,20 +14,23 @@ use std::cmp;
 use std::collections::HashMap;
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct IronMicResponse {
     pub requested_at: DateTime<Utc>,
     pub last_datafeed_updated_at: DateTime<Utc>,
     pub start: DateTime<Utc>,
     pub end: DateTime<Utc>,
+    pub actual_elapsed_duration_seconds: i64,
     pub callsigns: Vec<CallsignDurationStats>,
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct CallsignDurationStats {
     pub prefix: String,
     pub suffix: String,
     pub duration_seconds: i64,
-    pub uptime_percent: f64,
+    pub is_active: Option<bool>,
 }
 
 pub async fn get_iron_mic_stats(
@@ -38,6 +41,17 @@ pub async fn get_iron_mic_stats(
 
     if params.end <= params.start {
         return error_into_response(StatusCode::BAD_REQUEST, "end must be greater than start");
+    }
+
+    if params.start > now {
+        return error_into_response(StatusCode::BAD_REQUEST, "start must be greater than now");
+    }
+
+    if (params.end - params.start).num_seconds() > (60 * 60 * 24 * 365) {
+        return error_into_response(
+            StatusCode::BAD_REQUEST,
+            "end must be 1 year or less after start",
+        );
     }
 
     // Get last updated datafeed and return with errors if we can't unwrap
@@ -66,8 +80,11 @@ pub async fn get_iron_mic_stats(
                     session.duration_seconds_within(params.start, params.end, now)
                 {
                     map.entry((session.prefix, session.suffix))
-                        .and_modify(|e| *e += session_duration)
-                        .or_insert(session_duration);
+                        .and_modify(|(duration, is_active)| {
+                            *duration += session_duration;
+                            *is_active = *is_active || session.end_time.is_none();
+                        })
+                        .or_insert((session_duration, session.end_time.is_none()));
                 }
             }
 
@@ -75,11 +92,15 @@ pub async fn get_iron_mic_stats(
             let mut durations = map
                 .into_iter()
                 .map(
-                    |((prefix, suffix), duration_seconds)| CallsignDurationStats {
+                    |((prefix, suffix), (duration_seconds, is_active))| CallsignDurationStats {
                         prefix,
                         suffix,
                         duration_seconds,
-                        uptime_percent: duration_seconds as f64 / uptime_denominator as f64,
+                        is_active: if now > params.end {
+                            None
+                        } else {
+                            Some(is_active)
+                        },
                     },
                 )
                 .collect::<Vec<_>>();
@@ -92,6 +113,7 @@ pub async fn get_iron_mic_stats(
                     last_datafeed_updated_at,
                     start: params.start,
                     end: params.end,
+                    actual_elapsed_duration_seconds: uptime_denominator,
                     callsigns: durations,
                 }),
             )

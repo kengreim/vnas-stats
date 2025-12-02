@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 pub mod active_sessions;
-mod stats;
+pub mod stats;
 
 #[derive(Deserialize)]
 pub struct ClosedSessionInterval {
