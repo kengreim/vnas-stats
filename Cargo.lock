@@ -297,6 +297,7 @@ dependencies = [
  "serde",
  "shared",
  "sqlx",
+ "thiserror",
  "tokio",
  "tracing",
  "tracing-subscriber",
