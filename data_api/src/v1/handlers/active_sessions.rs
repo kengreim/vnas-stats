@@ -1,3 +1,4 @@
+use crate::v1::api_models::CallsignSessionsGroupedDto;
 use crate::v1::api_models::{
     ActiveSessionsDto, CallsignSessionAggregate, CallsignSessionDetailsDto,
     ControllerSessionDetailsDto, PositionSessionDetailsDto,
@@ -9,7 +10,6 @@ use axum::http::StatusCode;
 use chrono::Utc;
 use serde::Deserialize;
 use sqlx::{Pool, Postgres};
-use crate::v1::api_models::CallsignSessionsGroupedDto;
 
 #[derive(Deserialize)]
 pub struct ControllerSessionQuery {

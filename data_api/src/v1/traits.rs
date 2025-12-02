@@ -1,5 +1,5 @@
-use std::cmp;
 use chrono::{DateTime, Utc};
+use std::cmp;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -12,8 +12,12 @@ pub trait Session {
     fn start_time(&self) -> DateTime<Utc>;
     fn end_time(&self) -> Option<DateTime<Utc>>;
 
-    fn falls_within(&self, start_time: DateTime<Utc>, end_time: DateTime<Utc>, now: DateTime<Utc>) -> Result<bool, TimeError>
-    {
+    fn falls_within(
+        &self,
+        start_time: DateTime<Utc>,
+        end_time: DateTime<Utc>,
+        now: DateTime<Utc>,
+    ) -> Result<bool, TimeError> {
         if end_time <= start_time {
             Err(TimeError::IllegalEndTime)
         } else {
@@ -22,8 +26,12 @@ pub trait Session {
         }
     }
 
-    fn duration_seconds_within(&self, start_time: DateTime<Utc>, end_time: DateTime<Utc>, now: DateTime<Utc>) -> Result<i64, TimeError>
-    {
+    fn duration_seconds_within(
+        &self,
+        start_time: DateTime<Utc>,
+        end_time: DateTime<Utc>,
+        now: DateTime<Utc>,
+    ) -> Result<i64, TimeError> {
         if !self.falls_within(start_time, end_time, now)? {
             Ok(0)
         } else {

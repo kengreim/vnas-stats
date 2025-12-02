@@ -1,9 +1,9 @@
 mod api_models;
+mod db;
 mod db_helpers;
 mod handlers;
-mod db;
-mod utils;
 mod traits;
+mod utils;
 
 use axum::{Router, routing::get};
 

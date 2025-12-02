@@ -7,7 +7,7 @@ pub enum QueryError {
     #[error(transparent)]
     Sql(#[from] sqlx::Error),
     #[error("illegal args for query: {0}")]
-    IllegalArgs(String)
+    IllegalArgs(String),
 }
 
 #[derive(sqlx::FromRow)]
@@ -36,7 +36,9 @@ pub async fn get_callsign_sessions_between(
     end: DateTime<Utc>,
 ) -> Result<Vec<CallsignSessionRecord>, QueryError> {
     if end <= start {
-        return Err(QueryError::IllegalArgs("end must be greater than start".to_owned()));
+        return Err(QueryError::IllegalArgs(
+            "end must be greater than start".to_owned(),
+        ));
     }
 
     sqlx::query_as::<_, CallsignSessionRecord>(
