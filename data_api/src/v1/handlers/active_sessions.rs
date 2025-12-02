@@ -3,7 +3,7 @@ use crate::v1::api_models::{
     ActiveSessionsDto, CallsignSessionAggregate, CallsignSessionDetailsDto,
     ControllerSessionDetailsDto, PositionSessionDetailsDto,
 };
-use crate::v1::db_helpers::get_latest_datafeed_updated_at;
+use crate::v1::db::queries::get_latest_datafeed_updated_at;
 use axum::Json;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;

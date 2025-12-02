@@ -1,17 +1,11 @@
 mod api_models;
 mod db;
-mod db_helpers;
 mod handlers;
 mod traits;
 mod utils;
 
-use axum::{Router, routing::get};
-
-use crate::v1::handlers::active_sessions::{
-    get_active_callsigns, get_active_controllers, get_active_positions, get_callsign_sessions,
-    get_controller_sessions,
-};
 use crate::v1::handlers::stats::get_iron_mic_stats;
+use axum::{Router, routing::get};
 use sqlx::{Pool, Postgres};
 
 pub fn router(pool: Pool<Postgres>) -> Router {

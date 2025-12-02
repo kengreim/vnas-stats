@@ -1,6 +1,5 @@
 use crate::v1::db::queries;
-use crate::v1::db::queries::QueryError;
-use crate::v1::db_helpers::get_latest_datafeed_updated_at;
+use crate::v1::db::queries::{QueryError, get_latest_datafeed_updated_at};
 use crate::v1::handlers::{ClosedSessionInterval, error_into_response};
 use crate::v1::traits::Session;
 use axum::Json;
