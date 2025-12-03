@@ -1,0 +1,96 @@
+:root {
+  font-family: "Public Sans", system-ui, -apple-system, sans-serif;
+  color: #0f172a;
+  background: #f6f8fb;
+}
+
+body, #root {
+  min-height: 100vh;
+  margin: 0;
+}
+
+.page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.muted {
+  color: #64748b;
+  margin: 4px 0 0;
+}
+
+.badge {
+  background: #0ea5e9;
+  color: white;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.card {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+
+.card-header {
+  margin-bottom: 8px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.table th,
+.table td {
+  padding: 6px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.table th {
+  text-align: left;
+  color: #475569;
+  font-weight: 600;
+}
+
+.table td.right,
+.table th.right {
+  text-align: right;
+}
+
+.pill {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: #e2e8f0;
+  font-weight: 600;
+}
+
+.pill.live {
+  background: #0f7b5f;
+  color: white;
+}
+
+.error {
+  color: #b91c1c;
+}
