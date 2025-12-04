@@ -1,3 +1,11 @@
 {
-  "printWidth": 100
+  "printWidth": 100,
+  "tailwindStylesheet": "./src/app.css",
+  "tailwindFunctions": [
+    "clsx",
+    "cn"
+  ],
+  "plugins": [
+    "prettier-plugin-tailwindcss"
+  ]
 }

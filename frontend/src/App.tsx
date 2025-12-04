@@ -1,9 +1,19 @@
-import { createEffect, createMemo, createSignal, onCleanup } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup } from "solid-js";
 import { useQuery } from "@tanstack/solid-query";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
-import "./index.css";
-import { IronMicResponse } from "~/bindings.ts";
+import { IronMicResponse } from "@/bindings";
+
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/Table";
+import { cn } from "~/libs/cn.ts";
 
 dayjs.extend(utc);
 
@@ -128,8 +138,8 @@ export default function App() {
   });
 
   return (
-    <main class="page">
-      <header class="header">
+    <main class="h-dvh bg-background">
+      <header>
         <div>
           <h1>Iron Mic · Current Month</h1>
           {query.data && (
@@ -146,45 +156,57 @@ export default function App() {
       {query.error && <p class="error">{(query.error as Error).message}</p>}
 
       {grouped() && (
-        <div class="grid">
-          {(["ground", "tower", "tracon", "center"] as CategoryKey[]).map((key) => {
-            const items = grouped()![key] ?? [];
-            return (
-              <section class="card" aria-label={CATEGORY_LABELS[key]}>
-                <div class="card-header">
-                  <h2>{CATEGORY_LABELS[key]}</h2>
-                </div>
-                {items.length === 0 ? (
-                  <p class="muted">No sessions recorded.</p>
-                ) : (
-                  <table class="table">
-                    <thead>
-                      <tr>
-                        <th>#</th>
-                        <th>Callsign</th>
-                        <th class="right">Duration</th>
-                        <th class="right">Uptime%</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {items.slice(0, 25).map((item, idx) => (
-                        <tr>
-                          <td>{idx + 1}</td>
-                          <td>
-                            <span class={`pill ${item.isActive ? "live" : ""}`}>
-                              {item.prefix}_{item.suffix}
-                            </span>
-                          </td>
-                          <td class="right">{formatDuration(item.duration)}</td>
-                          <td class="right">{item.uptimePercent.toFixed(1)}%</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </section>
-            );
-          })}
+        <div class="flex justify-center space-x-16">
+          <For each={["ground", "tower", "tracon", "center"] as CategoryKey[]}>
+            {(key) => {
+              const items = grouped()![key] ?? [];
+              return (
+                <section class="card" aria-label={CATEGORY_LABELS[key]}>
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>{CATEGORY_LABELS[key]}</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <Table class="text-md table-auto font-mono">
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>#</TableHead>
+                            <TableHead>Callsign</TableHead>
+                            <TableHead class="text-right">Duration</TableHead>
+                            <TableHead class="text-right">Uptime %</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          <For each={items.slice(0, 25)}>
+                            {(item, index) => (
+                              <TableRow>
+                                <TableCell>{index() + 1}</TableCell>
+                                <TableCell>
+                                  <div
+                                    class={cn("rounded-md p-1", {
+                                      "bg-emerald-700 font-bold text-muted": item.isActive,
+                                    })}
+                                  >
+                                    {item.prefix}_{item.suffix}
+                                  </div>
+                                </TableCell>
+                                <TableCell class="text-right">
+                                  {formatDuration(item.duration)}
+                                </TableCell>
+                                <TableCell class="text-right">
+                                  {item.uptimePercent.toFixed(1)}%
+                                </TableCell>
+                              </TableRow>
+                            )}
+                          </For>
+                        </TableBody>
+                      </Table>
+                    </CardContent>
+                  </Card>
+                </section>
+              );
+            }}
+          </For>
         </div>
       )}
     </main>
@@ -193,7 +215,7 @@ export default function App() {
 
 function formatDuration(seconds: number): string {
   const hrs = Math.floor(seconds / 3600);
-  const mins = Math.floor((seconds % 3600) / 60);
+  const mins = String(Math.floor((seconds % 3600) / 60)).padStart(2, "0");
   return `${hrs}h ${mins}m`;
 }
 
