@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, onCleanup } from "solid-js";
+import { createEffect, createSignal, For, onCleanup } from "solid-js";
 import { useQuery } from "@tanstack/solid-query";
 import { createStore, reconcile } from "solid-js/store";
 import dayjs from "dayjs";
@@ -150,7 +150,7 @@ export default function App() {
   return (
     <main class="h-dvh bg-background">
       {query.isPending && <p>Loading…</p>}
-      {query.error && <p className="error">{(query.error as Error).message}</p>}
+      {query.error && <p class="error">{(query.error as Error).message}</p>}
 
       {store && (
         <div class="flex justify-center space-x-16">
@@ -176,8 +176,8 @@ export default function App() {
                           <For each={store[key]}>
                             {(item, index) => (
                               <TableRow>
-                                <TableCell>{index() + 1}</TableCell>
-                                <TableCell>
+                                <TableCell class="py-1">{index() + 1}</TableCell>
+                                <TableCell class="py-1">
                                   <div
                                     class={cn("rounded-md p-1", {
                                       "bg-emerald-700 font-bold text-muted": item.isActive,
@@ -186,10 +186,10 @@ export default function App() {
                                     {item.prefix}_{item.suffix}
                                   </div>
                                 </TableCell>
-                                <TableCell class="text-right">
+                                <TableCell class="py-1 text-right">
                                   {formatDuration(item.duration)}
                                 </TableCell>
-                                <TableCell class="text-right">
+                                <TableCell class="py-1 text-right">
                                   {item.uptimePercent.toFixed(1)}%
                                 </TableCell>
                               </TableRow>
