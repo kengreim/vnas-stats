@@ -1,5 +1,6 @@
 import { createEffect, createMemo, createSignal, For, onCleanup } from "solid-js";
 import { useQuery } from "@tanstack/solid-query";
+import { createStore, reconcile } from "solid-js/store";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 import { IronMicResponse } from "@/bindings";
@@ -43,6 +44,7 @@ const ironMicApiUrl = (start: string, end: string) => {
 };
 
 type LeaderboardItem = {
+  id: string;
   prefix: string;
   suffix: string;
   duration: number;
@@ -59,6 +61,12 @@ export default function App() {
 
   const [nextRefreshAt, setNextRefreshAt] = createSignal<number | null>(null);
   const [countdown, setCountdown] = createSignal<number | null>(null);
+  const [store, setStore] = createStore<Record<CategoryKey, LeaderboardItem[]>>({
+    ground: [],
+    tower: [],
+    tracon: [],
+    center: [],
+  });
 
   const query = useQuery(() => ({
     queryKey: ["iron-mic", start(), end()],
@@ -105,12 +113,11 @@ export default function App() {
     onCleanup(() => clearInterval(id));
   });
 
-  const grouped = createMemo(() => {
+  createEffect(() => {
     const data = query.data;
-    if (!data) return null;
-    console.log(data);
+    if (!data) return;
     const elapsed = Math.max(data.actualElapsedDurationSeconds, 1);
-    const map: Record<CategoryKey, LeaderboardItem[]> = {
+    const next: Record<CategoryKey, LeaderboardItem[]> = {
       ground: [],
       tower: [],
       tracon: [],
@@ -120,6 +127,7 @@ export default function App() {
       const suffix = cs.suffix.toUpperCase();
       const uptimePercent = (cs.durationSeconds / elapsed) * 100;
       const item: LeaderboardItem = {
+        id: `${cs.prefix}_${cs.suffix}`,
         prefix: cs.prefix,
         suffix,
         duration: cs.durationSeconds,
@@ -128,40 +136,26 @@ export default function App() {
       };
       (Object.keys(CATEGORY_SUFFIXES) as CategoryKey[]).forEach((key) => {
         if (CATEGORY_SUFFIXES[key].includes(suffix)) {
-          map[key].push(item);
+          next[key].push(item);
         }
       });
     }
-    (Object.keys(map) as CategoryKey[]).forEach((key) => {
-      map[key].sort((a, b) => b.duration - a.duration);
-      map[key].splice(25, map[key].length - 25);
+    (Object.keys(next) as CategoryKey[]).forEach((key) => {
+      next[key].sort((a, b) => b.duration - a.duration);
+      next[key] = next[key].slice(0, 25);
+      setStore(key, reconcile(next[key], { key: "id", merge: true }));
     });
-    return map;
   });
 
   return (
     <main class="h-dvh bg-background">
-      <header>
-        <div>
-          <h1>Iron Mic · Current Month</h1>
-          {query.data && (
-            <p class="muted">
-              Window: {formatDateUtc(query.data.start)} → {formatDateUtc(query.data.end)} ·{" "}
-              {countdown() != null ? `Next update ~${countdown()}s` : "Window ended"}
-            </p>
-          )}
-        </div>
-        {query.isFetching && <span class="badge">Refreshing…</span>}
-      </header>
-
       {query.isPending && <p>Loading…</p>}
-      {query.error && <p class="error">{(query.error as Error).message}</p>}
+      {query.error && <p className="error">{(query.error as Error).message}</p>}
 
-      {grouped() && (
+      {store && (
         <div class="flex justify-center space-x-16">
           <For each={["ground", "tower", "tracon", "center"] as CategoryKey[]}>
             {(key) => {
-              const items = () => grouped()?.[key] ?? [];
               return (
                 <section class="card" aria-label={CATEGORY_LABELS[key]}>
                   <Card>
@@ -179,7 +173,7 @@ export default function App() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          <For each={items()}>
+                          <For each={store[key]}>
                             {(item, index) => (
                               <TableRow>
                                 <TableCell>{index() + 1}</TableCell>
@@ -211,6 +205,18 @@ export default function App() {
           </For>
         </div>
       )}
+      <header>
+        <div>
+          <h1>Iron Mic · Current Month</h1>
+          {query.data && (
+            <p class="muted">
+              Window: {formatDateUtc(query.data.start)} → {formatDateUtc(query.data.end)} ·{" "}
+              {countdown() != null ? `Next update ~${countdown()}s` : "Window ended"}
+            </p>
+          )}
+        </div>
+        {query.isFetching && <span class="badge">Refreshing…</span>}
+      </header>
     </main>
   );
 }
