@@ -108,6 +108,7 @@ export default function App() {
   const grouped = createMemo(() => {
     const data = query.data;
     if (!data) return null;
+    console.log(data);
     const elapsed = Math.max(data.actualElapsedDurationSeconds, 1);
     const map: Record<CategoryKey, LeaderboardItem[]> = {
       ground: [],
@@ -133,6 +134,7 @@ export default function App() {
     }
     (Object.keys(map) as CategoryKey[]).forEach((key) => {
       map[key].sort((a, b) => b.duration - a.duration);
+      map[key].splice(25, map[key].length - 25);
     });
     return map;
   });
@@ -159,7 +161,7 @@ export default function App() {
         <div class="flex justify-center space-x-16">
           <For each={["ground", "tower", "tracon", "center"] as CategoryKey[]}>
             {(key) => {
-              const items = grouped()![key] ?? [];
+              const items = () => grouped()?.[key] ?? [];
               return (
                 <section class="card" aria-label={CATEGORY_LABELS[key]}>
                   <Card>
@@ -177,7 +179,7 @@ export default function App() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          <For each={items.slice(0, 25)}>
+                          <For each={items()}>
                             {(item, index) => (
                               <TableRow>
                                 <TableCell>{index() + 1}</TableCell>
