@@ -221,7 +221,7 @@ pub async fn finalize_callsign_sessions(
 
     if event_enabled!(Level::TRACE) {
         for callsign_id in &to_close_callsign {
-            trace!(id = %callsign_id, "closing callsign session");
+            trace!(name: "datafeed.processed.callsign.closed", id = %callsign_id, "closing callsign session");
         }
     }
 
@@ -253,7 +253,7 @@ pub async fn finalize_position_sessions(
 
     if event_enabled!(Level::TRACE) {
         for position_session_id in &to_close_positions {
-            trace!(id = %position_session_id, "closing position session");
+            trace!(name: "datafeed.processed.position.closed", id = %position_session_id, "closing position session");
         }
     }
 

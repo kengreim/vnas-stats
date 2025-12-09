@@ -19,7 +19,7 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, debug_span, error, info, instrument, warn};
+use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
 #[tokio::main]
@@ -31,7 +31,7 @@ async fn main() -> Result<(), MainError> {
         error!(error = ?e, "configuration could not be initialized");
         panic!("configuration could not be initialized");
     });
-    info!(config = ?config, "config loaded");
+    info!(name: "config.loaded", config = ?config, "config loaded");
 
     let db_pool = initialize_db(&config.postgres).await?;
 
@@ -71,75 +71,75 @@ async fn main() -> Result<(), MainError> {
 
     tokio::select! {
         res = &mut axum_handle => {
-            info!("axum task completed first, propagating cancellation token to other tasks");
+            info!(name: "axum.completed", "axum task completed first, propagating cancellation token to other tasks");
             axum_done = true;
             shutdown_token.cancel();
             match res {
                 Ok(Ok(())) => {}
                 Ok(Err(e)) => {
-                    warn!(error = ?e, "axum task completed due to error");
+                    warn!(name: "axum.completed", error = ?e, "axum task completed due to error");
                     first_err.get_or_insert(e.into());
                 }
                 Err(join) => {
-                    warn!(error = ?join, "axum task completed due to error");
+                    warn!(name: "axum.completed", error = ?join, "axum task completed due to error");
                     first_err.get_or_insert(join.into());
                 }
             }
         }
         res = &mut fetcher_handle => {
-            info!("fetcher task completed first, propagating cancellation token to other tasks");
+            info!(name: "fetcher.completed", "fetcher task completed first, propagating cancellation token to other tasks");
             fetcher_done = true;
             shutdown_token.cancel();
             match res {
                 Ok(Ok(())) => {}
                 Ok(Err(e)) => {
-                    warn!(error = ?e, "fetcher task completed due to error");
+                    warn!(name: "fetcher.completed", error = ?e, "fetcher task completed due to error");
                     first_err.get_or_insert(e.into());
                 }
                 Err(join) => {
-                    warn!(error = ?join, "fetcher task completed due to error");
+                    warn!(name: "fetcher.completed", error = ?join, "fetcher task completed due to error");
                     first_err.get_or_insert(join.into());
                 }
             }
         }
         res = &mut signal_handle => {
-            info!("SIGINT/SIGTERM listener task completed first, propagating cancellation token to other tasks");
+            info!(name: "listener.completed", "SIGINT/SIGTERM listener task completed first, propagating cancellation token to other tasks");
             shutdown_token.cancel();
             if let Err(join) = res {
-                warn!(error = ?join, "error with SIGINT/SIGTERM listener task");
+                warn!(name: "listener.completed", error = ?join, "error with SIGINT/SIGTERM listener task");
                 first_err.get_or_insert(join.into());
             }
         }
     }
 
     if !axum_done {
-        info!("awaiting completion of axum task");
+        info!(name:"axum.completion.awaiting", "awaiting completion of axum task");
         match axum_handle.await {
             Ok(Ok(())) => {
-                info!("axum task completed successfully");
+                info!(name: "axum.completed", "axum task completed successfully");
             }
             Ok(Err(e)) => {
-                info!(error = ?e, "axum task completed with error");
+                info!(name: "axum.completed", error = ?e, "axum task completed with error");
                 first_err.get_or_insert(e.into());
             }
             Err(join) => {
-                info!(error = ?join, "axum task completed with error");
+                info!(name: "axum.completed", error = ?join, "axum task completed with error");
                 first_err.get_or_insert(join.into());
             }
         }
     }
     if !fetcher_done {
-        info!("awaiting completion of fetcher task");
+        info!(name: "fetcher.completion.awaiting", "awaiting completion of fetcher task");
         match fetcher_handle.await {
             Ok(Ok(())) => {
-                info!("fetcher task completed successfully");
+                info!(name: "fetcher.completed", "fetcher task completed successfully");
             }
             Ok(Err(e)) => {
-                info!(error = ?e, "fetcher task completed with error");
+                info!(name: "fetcher.completed", error = ?e, "fetcher task completed with error");
                 first_err.get_or_insert(e.into());
             }
             Err(join) => {
-                info!(error = ?join, "fetcher task completed with error");
+                info!(name: "fetcher.completed", error = ?join, "fetcher task completed with error");
                 first_err.get_or_insert(join.into());
             }
         }
@@ -167,18 +167,16 @@ async fn fetcher_loop(
     // Default reqwest client
     let http_client = reqwest::Client::new();
 
-    info!("initialized Datafeed Fetcher");
+    info!(name: "fetcher.loop.initialized", "initialized Datafeed Fetcher");
     let mut initial_loop = true;
     loop {
-        let span = debug_span!("datafeed fetcher main loop");
-        let _enter = span.enter();
         if initial_loop {
             initial_loop = false;
         } else {
             tokio::select! {
                 _ = sleep(Duration::from_secs(interval_seconds)) => {},
                 _ = shutdown.cancelled() => {
-                    info!("shutdown requested, exiting fetcher loop");
+                    info!(name: "fetcher_loop.shutdown.requested", "shutdown requested, exiting fetcher loop");
                     break;
                 }
             }
@@ -189,7 +187,7 @@ async fn fetcher_loop(
         let (payload, datafeed_updated_at) = match fetch_datafeed(&http_client).await {
             Ok((p, t)) => (p, t),
             Err(e) => {
-                warn!(error = ?e, "failed to fetch and deserialize datafeed");
+                warn!(name:"fetcher_loop.datafeed.received", error = ?e, "failed to fetch and deserialize datafeed");
                 *last_error.write() = Some(e.into());
                 continue;
             }
@@ -197,17 +195,17 @@ async fn fetcher_loop(
         info!(updated_at = ?datafeed_updated_at, "fetched datafeed");
 
         if let Err(e) = enqueue_datafeed(&db_pool, payload, datafeed_updated_at).await {
-            warn!(error = ?e, "could not enqueue datafeed into Postgres");
+            warn!(name:"fetcher_loop.datafeed.enqueued", error = ?e, "could not enqueue datafeed into Postgres");
             *last_error.write() = Some(e);
             continue;
         } else {
             *last_successful_update.write() = Some(now);
-            debug!("enqueued datafeed into Postgres queue");
+            debug!(name:"fetcher_loop.datafeed.enqueued", "enqueued datafeed into Postgres queue");
         }
 
         // If shutdown was requested during processing, break after finishing the iteration.
         if shutdown.is_cancelled() {
-            info!("shutdown requested, fetcher loop exiting after current iteration");
+            info!(name: "fetcher_loop.shutdown.requested", "shutdown requested, fetcher loop exiting after current iteration");
             break;
         }
     }
@@ -228,7 +226,7 @@ async fn run_health_server(
     last_error: Arc<RwLock<Option<EnqueueError>>>,
     shutdown: CancellationToken,
 ) -> Result<(), std::io::Error> {
-    info!("starting axum health server");
+    info!(name: "axum.initialized", "starting axum health server");
     let app = Router::new()
         .route("/health", get(health_check))
         .with_state(AxumState {

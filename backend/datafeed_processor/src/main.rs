@@ -34,7 +34,7 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::time::{Duration, sleep};
 use tokio_util::sync::CancellationToken;
-use tracing::{Level, debug, debug_span, event_enabled, info, instrument, trace, warn};
+use tracing::{Instrument, Level, debug, event_enabled, info, info_span, instrument, trace, warn};
 use uuid::Uuid;
 
 #[tokio::main]
@@ -43,6 +43,7 @@ async fn main() -> Result<(), ProcessorMainError> {
 
     // Set up config
     let config = load_config().map_err(InitializationError::from)?;
+    info!(name: "config.loaded", config = ?config, "config loaded");
 
     // Initialize DB
     let db_pool = initialize_db(&config.postgres).await?;
@@ -71,75 +72,75 @@ async fn main() -> Result<(), ProcessorMainError> {
 
     tokio::select! {
         res = &mut axum_handle => {
-            info!("axum task completed first, propagating cancellation token to other tasks");
+            info!(name: "axum.completed", "axum task completed first, propagating cancellation token to other tasks");
             axum_done = true;
             shutdown_token.cancel();
             match res {
                 Ok(Ok(())) => {}
                 Ok(Err(e)) => {
-                     warn!(error = ?e, "axum task completed due to error");
+                     warn!(name: "axum.completed", error = ?e, "axum task completed due to error");
                     first_err.get_or_insert(e.into());
                 }
                 Err(join) => {
-                     warn!(error = ?join, "axum task completed due to error");
+                     warn!(name: "axum.completed", error = ?join, "axum task completed due to error");
                     first_err.get_or_insert(join.into());
                 }
             }
         }
         res = &mut processor_handle => {
-            info!("processor task completed first, propagating cancellation token to other tasks");
+            info!(name: "processor.completed", "processor task completed first, propagating cancellation token to other tasks");
             processor_done = true;
             shutdown_token.cancel();
             match res {
                 Ok(Ok(())) => {}
                 Ok(Err(e)) => {
-                    warn!(error = ?e, "processor task completed due to error");
+                    warn!(name: "processor.completed", error = ?e, "processor task completed due to error");
                     first_err.get_or_insert(e);
                 }
                 Err(join) => {
-                    warn!(error = ?join, "processor task completed due to error");
+                    warn!(name: "processor.completed", error = ?join, "processor task completed due to error");
                     first_err.get_or_insert(join.into());
                 }
             }
         }
         res = &mut signal_handle => {
-            info!("SIGINT/SIGTERM listener task completed first, propagating cancellation token to other tasks");
+            info!(name: "listener.completed", "SIGINT/SIGTERM listener task completed first, propagating cancellation token to other tasks");
             shutdown_token.cancel();
             if let Err(join) = res {
-                warn!(error = ?join, "error with SIGINT/SIGTERM listener task");
+                warn!(name: "listener.completed", error = ?join, "error with SIGINT/SIGTERM listener task");
                 first_err.get_or_insert(join.into());
             }
         }
     }
 
     if !axum_done {
-        info!("awaiting completion of axum task");
+        info!(name:"axum.completion.awaiting", "awaiting completion of axum task");
         match axum_handle.await {
             Ok(Ok(())) => {
-                info!("axum task completed successfully");
+                info!(name: "axum.completed", "axum task completed successfully");
             }
             Ok(Err(e)) => {
-                info!(error = ?e, "axum task completed with error");
+                info!(name: "axum.completed", error = ?e, "axum task completed with error");
                 first_err.get_or_insert(e.into());
             }
             Err(join) => {
-                info!(error = ?join, "axum task completed with error");
+                info!(name: "axum.completed", error = ?join, "axum task completed with error");
                 first_err.get_or_insert(join.into());
             }
         }
     }
     if !processor_done {
-        info!("awaiting completion of processor task");
+        info!(name: "processor.completion.awaiting", "awaiting completion of processor task");
         match processor_handle.await {
             Ok(Ok(())) => {
-                info!("processor task completed successfully");
+                info!(name: "processor.completed", "processor task completed successfully");
             }
             Ok(Err(e)) => {
-                info!(error = ?e, "processor task completed with error");
+                info!(name: "processor.completed", error = ?e, "processor task completed with error");
                 first_err.get_or_insert(e);
             }
             Err(join) => {
-                info!(error = ?join, "processor task completed with error");
+                info!(name: "processor.completed", error = ?join, "processor task completed with error");
                 first_err.get_or_insert(join.into());
             }
         }
@@ -165,7 +166,7 @@ async fn run_health_server(
     last_processed_datafeed: Arc<RwLock<Option<DateTime<Utc>>>>,
     shutdown: CancellationToken,
 ) -> Result<(), std::io::Error> {
-    info!("starting axum health server");
+    info!(name: "axum.initialized", "starting axum health server");
     let app = Router::new()
         .route("/health", get(health_check))
         .with_state(AxumState {
@@ -196,8 +197,11 @@ async fn run_datafeed_processing_loop(
     shutdown: CancellationToken,
 ) -> Result<(), ProcessorMainError> {
     // Process any backlog before listening
-    info!("starting processing backlog of queued datafeeds");
-    process_pending_datafeeds(&db_pool, &last_processed_datafeed, 25).await?;
+    info!(name: "processing.backlog.started", "starting processing backlog of queued datafeeds");
+    process_pending_datafeeds(&db_pool, &last_processed_datafeed, 25)
+        .instrument(info_span!("process_backlog"))
+        .await?;
+    info!(name: "processing.backlog.completed", "completed processing backlog of queued datafeeds");
 
     // Listen for new datafeeds
     let mut listener = PgListener::connect_with(&db_pool)
@@ -207,25 +211,23 @@ async fn run_datafeed_processing_loop(
         .listen("datafeed_queue")
         .await
         .map_err(InitializationError::from)?;
-    info!("listening for new datafeeds via Postgres NOTIFY");
+    info!(name:"datafeed_loop.listener.started", "listening for new datafeeds via Postgres NOTIFY");
 
     loop {
         tokio::select! {
             _ = shutdown.cancelled() => {
-                info!("shutdown requested, exiting processor loop");
+                info!(name: "datafeed_loop.shutdown.received", "shutdown requested, exiting processor loop");
                 break;
             }
             recv = listener.recv() => {
-                let span = debug_span!("pg_notify message received");
-                let _enter = span.enter();
                 match recv {
                     Ok(notification) => {
-                        trace!(payload = notification.payload(), "received datafeed notification");
+                        trace!(name:"datafeed_loop.listener.received", payload = notification.payload(), "received datafeed notification");
                         // Process pending datafeeds; if this fails, propagate the error after finishing this payload.
                         process_pending_datafeeds(&db_pool, &last_processed_datafeed, 10).await?;
                     }
                     Err(e) => {
-                        warn!(error = ?e, "error receiving Postgres notification");
+                        warn!(name:"datafeed_loop.listener.received", error = ?e, "error receiving Postgres notification");
                         sleep(Duration::from_secs(1)).await;
                     }
                 }
@@ -266,13 +268,14 @@ async fn process_pending_datafeeds(
             let (payload_id, new_payload) = upsert_datafeed_payload(tx.as_mut(), &message).await?;
 
             if new_payload {
-                debug!(updated_at = ?datafeed_root.updated_at, "new datafeed update received");
+                debug!(name: "datafeed.inspected.found_new", updated_at = ?datafeed_root.updated_at, "new datafeed update received");
                 if let Err(e) = process_datafeed_payload(pool, &datafeed_root).await {
                     tx.rollback().await?;
                     return Err(e.into());
                 }
             } else {
                 trace!(
+                    name: "datafeed.inspected.found_duplicate",
                     updated_at = ?datafeed_root.updated_at,
                     "skipping processing; datafeed already processed"
                 );
@@ -329,6 +332,7 @@ async fn process_datafeed_payload(
             Ok(parts) => parts,
             Err(e) => {
                 warn!(
+                    name: "datafeed.processed.controller.parsed",
                     error = ?e,
                     callsign = controller.vatsim_data.callsign,
                     cid = controller.vatsim_data.cid,
@@ -340,6 +344,7 @@ async fn process_datafeed_payload(
 
         if controller.is_active {
             trace!(
+                name: "datafeed.processed.controller.found_active",
                 cid = cid,
                 prefix = prefix,
                 suffix = suffix,
@@ -351,6 +356,7 @@ async fn process_datafeed_payload(
                     && existing.position_id == position_id
                 {
                     trace!(
+                        name: "datafeed.processed.controller.found_previously_active",
                         "controller was previously tracked and has same login time, position_id and callsign"
                     );
                     controller_actions.push(ControllerAction::UpdateExisting {
@@ -363,6 +369,7 @@ async fn process_datafeed_payload(
                     active_position_ids.insert(existing.position_id);
                 } else {
                     trace!(
+                        name: "datafeed.processed.controller.found_previously_active.session_or_time_mismatched",
                         current_position_id = position_id,
                         existing_position_id = existing.position_id,
                         current_login_time = ?controller.login_time,
@@ -385,7 +392,10 @@ async fn process_datafeed_payload(
                     });
                 }
             } else {
-                trace!("controller was not previously tracked, creating new session");
+                trace!(
+                    name: "datafeed.processed.controller.found_new",
+                    "controller was not previously tracked, creating new session"
+                );
                 controller_actions.push(ControllerAction::CreateNew {
                     controller: controller.clone(),
                     callsign_key: (prefix.to_string(), suffix.to_string()),
@@ -395,6 +405,7 @@ async fn process_datafeed_payload(
             }
         } else if let Some(existing) = existing_active_by_cid.remove(&cid) {
             trace!(
+                name: "datafeed.processed.controller.found_inactive",
                 cid = cid,
                 prefix = prefix,
                 suffix = suffix,
@@ -416,7 +427,9 @@ async fn process_datafeed_payload(
     if event_enabled!(Level::TRACE) {
         let remaining_to_close = existing_active_by_cid.values().collect::<Vec<_>>();
         for missing in &remaining_to_close {
-            trace!(controller = ?missing, "previously tracked controller no longer seen in datafeed");
+            trace!(
+                name: "datafeed.processed.controller.missing_from_datafeed",
+                controller = ?missing, "previously tracked controller no longer seen in datafeed");
         }
     }
 
@@ -524,7 +537,7 @@ async fn process_datafeed_payload(
             ControllerAction::Close { .. } => {}
         }
     }
-    trace!("completed processing controller sessions");
+    trace!(name: "datafeed.processed.controllers.completed", "completed processing controller sessions");
 
     let closed_callsign_session_ids = finalize_callsign_sessions(
         &mut tx,
@@ -533,7 +546,7 @@ async fn process_datafeed_payload(
         datafeed.updated_at,
     )
     .await?;
-    trace!("completed processing callsign sessions");
+    trace!(name: "datafeed.processed.callsigns.completed", "completed processing callsign sessions");
 
     let closed_position_session_ids = finalize_position_sessions(
         &mut tx,
@@ -542,7 +555,7 @@ async fn process_datafeed_payload(
         datafeed.updated_at,
     )
     .await?;
-    trace!("completed processing position sessions");
+    trace!(name: "datafeed.processed.positions.completed", "completed processing position sessions");
 
     tx.commit().await?;
 

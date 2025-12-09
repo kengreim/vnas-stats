@@ -21,11 +21,11 @@ use sqlx::{Pool, Postgres};
 use std::env;
 use tokio::signal;
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tracing::{info, instrument};
 use tracing_subscriber::fmt::Layer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{EnvFilter, Registry};
+use tracing_subscriber::{EnvFilter, registry};
 
 pub const DATAFEED_QUEUE_NAME: &str = "vnas_stats";
 pub const ENV_VAR_PREFIX: &str = "VNAS_STATS__";
@@ -79,6 +79,7 @@ pub mod error {
     }
 }
 
+#[instrument]
 pub async fn initialize_db(
     pg_config: &PostgresConfig,
 ) -> Result<Pool<Postgres>, InitializationError> {
@@ -86,6 +87,8 @@ pub async fn initialize_db(
         .max_connections(5)
         .connect(&pg_config.connection_string)
         .await?;
+
+    info!(name: "db.connected", "db pool created and connected");
 
     // Run any new migrations
     sqlx::migrate!("./migrations").run(&pool).await?;
@@ -106,8 +109,8 @@ pub async fn shutdown_listener(token: Option<CancellationToken>) {
     let terminate = std::future::pending::<()>();
 
     tokio::select! {
-        _ = ctrl_c => info!("received Ctrl+C signal, shutting down"),
-        _ = terminate => info!("received SIGTERM signal, shutting down"),
+        _ = ctrl_c => info!(name: "signal.ctrlc.received", "received Ctrl+C signal, shutting down"),
+        _ = terminate => info!(name: "signal.sigterm.received", "received SIGTERM signal, shutting down"),
     }
 
     if let Some(token) = token {
@@ -173,7 +176,7 @@ pub fn init_tracing_and_oltp(
     let env_filter_layer =
         EnvFilter::try_from_default_env().expect("failed to get RUST_LOG from env");
 
-    Registry::default()
+    registry()
         .with(env_filter_layer)
         .with(fmt_layer)
         .with(otel_log_layer)
