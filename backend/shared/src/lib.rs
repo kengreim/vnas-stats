@@ -7,7 +7,7 @@ use figment::providers::{Env, Format, Toml};
 use opentelemetry::global;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
-use opentelemetry_otlp::WithTonicConfig;
+use opentelemetry_otlp::{LogExporterBuilder, WithTonicConfig};
 use opentelemetry_resource_detectors::ProcessResourceDetector;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
@@ -15,7 +15,6 @@ use opentelemetry_sdk::resource::{
     EnvResourceDetector, ResourceDetector, SdkProvidedResourceDetector,
 };
 use opentelemetry_sdk::trace::SdkTracerProvider;
-use opentelemetry_stdout::LogExporter;
 use serde::Deserialize;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Pool, Postgres};
@@ -130,11 +129,11 @@ pub fn init_tracing_and_oltp(
     }
 
     // tracing_opentelemetry setup for spans
-    let exporter = opentelemetry_otlp::SpanExporterBuilder::default()
+    let span_exporter = opentelemetry_otlp::SpanExporterBuilder::default()
         .with_tonic()
         .with_tls_config(tonic::transport::ClientTlsConfig::new().with_native_roots())
         .build()
-        .expect("Failed to create OTLP exporter");
+        .expect("Failed to create OTLP span exporter");
 
     let detectors: Vec<Box<dyn ResourceDetector>> = vec![
         Box::new(SdkProvidedResourceDetector),
@@ -145,7 +144,7 @@ pub fn init_tracing_and_oltp(
 
     let tracer_provider = SdkTracerProvider::builder()
         .with_resource(resource)
-        .with_batch_exporter(exporter)
+        .with_batch_exporter(span_exporter)
         .build();
     let tracer = tracer_provider.tracer(name.to_string());
     global::set_tracer_provider(tracer_provider.clone());
@@ -153,9 +152,14 @@ pub fn init_tracing_and_oltp(
     let telemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
 
     // opentelemetry_appender_tracing setup for logs
-    let log_exporter = LogExporter::default();
+    let log_exporter = LogExporterBuilder::default()
+        .with_tonic()
+        .with_tls_config(tonic::transport::ClientTlsConfig::new().with_native_roots())
+        .build()
+        .expect("Failed to create OTLP log exporter");
+
     let logger_provider = SdkLoggerProvider::builder()
-        .with_simple_exporter(log_exporter)
+        .with_batch_exporter(log_exporter)
         .build();
 
     let otel_log_layer = OpenTelemetryTracingBridge::new(&logger_provider);
