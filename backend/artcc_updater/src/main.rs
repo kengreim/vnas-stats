@@ -16,7 +16,9 @@ use shared::{initialize_db, load_config};
 use sqlx::{Pool, Postgres, Row};
 use thiserror::Error;
 use tracing::{debug, error, info};
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::fmt::Layer;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::{EnvFilter, Registry};
 
 #[derive(Clone)]
 pub struct AxumState {
@@ -26,12 +28,22 @@ pub struct AxumState {
 
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
-    let subscriber = tracing_subscriber::fmt()
+    let fmt_subscriber = tracing_subscriber::fmt()
         .compact()
         .with_file(true)
         .with_line_number(true)
         .with_env_filter(EnvFilter::from_default_env())
         .finish();
+
+    let fmt_layer = Layer::new()
+        .compact()
+        .with_file(true)
+        .with_line_number(true);
+
+    let env_filter_layer =
+        EnvFilter::try_from_default_env().expect("failed to get RUST_LOG from env");
+
+    let subscriber = Registry::default().with(env_filter_layer).with(fmt_layer);
 
     tracing::subscriber::set_global_default(subscriber).map_err(InitializationError::from)?;
 
