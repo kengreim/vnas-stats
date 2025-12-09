@@ -31,7 +31,7 @@ pub enum QueryError {
 //         .map_err(QueryError::from)
 // }
 
-#[instrument(skip(executor))]
+#[instrument(level = "debug", skip(executor))]
 pub async fn fetch_datafeed_batch<'e, E>(
     executor: E,
     limit: i64,
@@ -56,7 +56,7 @@ where
 
 /// Returns a tuple `(Uuid, bool)` where the Uuid is the payload primary key in the
 /// database and the bool indicates whether a new row was inserted
-#[instrument(skip(executor, message))]
+#[instrument(level = "debug", skip(executor, message))]
 pub async fn upsert_datafeed_payload<'e, E>(
     executor: &mut E,
     message: &QueuedDatafeed,
@@ -103,7 +103,7 @@ where
     Ok((existing_id, false))
 }
 
-#[instrument(skip(executor))]
+#[instrument(level = "debug", skip(executor))]
 pub async fn insert_datafeed_message<'e, E>(
     executor: &mut E,
     queue_id: Uuid,
@@ -131,7 +131,7 @@ where
     .map_err(QueryError::from)
 }
 
-#[instrument(skip(executor))]
+#[instrument(level = "debug", skip(executor))]
 pub async fn delete_queued_datafeed<'e, E>(executor: &mut E, id: Uuid) -> Result<(), QueryError>
 where
     for<'c> &'c mut E: Executor<'c, Database = Postgres>,
@@ -144,7 +144,7 @@ where
         .map_err(QueryError::from)
 }
 
-#[instrument(skip(executor))]
+#[instrument(level = "debug", skip(executor))]
 pub async fn get_active_controller_session_keys<'e, E>(
     executor: E,
 ) -> Result<Vec<ActiveSessionKey>, QueryError>
@@ -224,7 +224,7 @@ where
     Ok(id)
 }
 
-#[instrument(skip(executor))]
+#[instrument(level = "debug", skip(executor))]
 pub async fn update_active_controller_session<'e, E>(
     executor: E,
     session_id: Uuid,
@@ -265,7 +265,7 @@ where
     .map_err(QueryError::from)
 }
 
-#[instrument(skip(executor))]
+#[instrument(level = "debug", skip(executor))]
 pub async fn complete_controller_sessions<'e, E>(
     executor: E,
     ids: &[Uuid],
@@ -294,7 +294,7 @@ where
     Ok(result.rows_affected())
 }
 
-#[instrument(skip(executor))]
+#[instrument(level = "debug", skip(executor))]
 pub async fn get_active_callsign_sessions<'e, E>(
     executor: E,
 ) -> Result<Vec<CallsignSession>, QueryError>
@@ -313,7 +313,7 @@ where
     .map_err(QueryError::from)
 }
 
-#[instrument(skip(executor))]
+#[instrument(level = "debug", skip(executor))]
 pub async fn get_active_position_sessions<'e, E>(
     executor: E,
 ) -> Result<Vec<PositionSession>, QueryError>
@@ -332,7 +332,7 @@ where
     .map_err(QueryError::from)
 }
 
-#[instrument(skip(executor))]
+#[instrument(level = "debug", skip(executor))]
 pub async fn fetch_callsign_session_details<'e, E>(
     executor: E,
     ids: &[Uuid],
@@ -357,7 +357,7 @@ where
     .map_err(QueryError::from)
 }
 
-#[instrument(skip(executor))]
+#[instrument(level = "debug", skip(executor))]
 pub async fn fetch_position_session_details<'e, E>(
     executor: E,
     ids: &[Uuid],
@@ -383,7 +383,7 @@ where
     .map_err(QueryError::from)
 }
 
-#[instrument(skip(executor))]
+#[instrument(level = "debug", skip(executor))]
 pub async fn get_or_create_callsign_session<E>(
     executor: &mut E,
     prefix: &str,
@@ -438,7 +438,7 @@ where
     Ok(id)
 }
 
-#[instrument(skip(executor))]
+#[instrument(level = "debug", skip(executor))]
 pub async fn update_callsign_session_last_seen<'e, E>(
     executor: &mut E,
     id: Uuid,
@@ -462,7 +462,7 @@ where
     .map_err(QueryError::from)
 }
 
-#[instrument(skip(executor))]
+#[instrument(level = "debug", skip(executor))]
 pub async fn complete_callsign_sessions<'e, E>(
     executor: E,
     ids: &[Uuid],
@@ -491,7 +491,7 @@ where
     Ok(result.rows_affected())
 }
 
-#[instrument(skip(executor))]
+#[instrument(level = "debug", skip(executor))]
 pub async fn get_or_create_position_session<E>(
     executor: &mut E,
     position_id: &str,
@@ -542,7 +542,7 @@ where
     Ok(id)
 }
 
-#[instrument(skip(executor))]
+#[instrument(level = "debug", skip(executor))]
 pub async fn update_position_session_last_seen<'e, E>(
     executor: &mut E,
     id: Uuid,
@@ -566,7 +566,7 @@ where
     .map_err(QueryError::from)
 }
 
-#[instrument(skip(executor))]
+#[instrument(level = "debug", skip(executor))]
 pub async fn complete_position_sessions<'e, E>(
     executor: E,
     ids: &[Uuid],
