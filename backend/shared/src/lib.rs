@@ -1,14 +1,27 @@
 pub mod vnas;
 
+use crate::error::InitializationError::MissingEnvVar;
 use crate::error::{ConfigError, InitializationError};
 use figment::Figment;
 use figment::providers::{Env, Format, Toml};
+use opentelemetry::trace::TracerProvider;
+use opentelemetry_otlp::WithTonicConfig;
+use opentelemetry_resource_detectors::ProcessResourceDetector;
+use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::resource::{
+    EnvResourceDetector, ResourceDetector, SdkProvidedResourceDetector,
+};
+use opentelemetry_sdk::trace::SdkTracerProvider;
 use serde::Deserialize;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Pool, Postgres};
+use std::env;
 use tokio::signal;
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tracing::{Subscriber, info};
+use tracing_subscriber::fmt::Layer;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::{EnvFilter, Registry};
 
 pub const DATAFEED_QUEUE_NAME: &str = "vnas_stats";
 pub const ENV_VAR_PREFIX: &str = "VNAS_STATS__";
@@ -57,6 +70,8 @@ pub mod error {
         Migration(#[from] sqlx::migrate::MigrateError),
         #[error(transparent)]
         Db(#[from] sqlx::Error),
+        #[error("missing environment variable {0}")]
+        MissingEnvVar(String),
     }
 }
 
@@ -94,4 +109,60 @@ pub async fn shutdown_listener(token: Option<CancellationToken>) {
     if let Some(token) = token {
         token.cancel();
     }
+}
+
+pub fn init_tracing_and_oltp(
+    name: impl ToString,
+) -> Result<
+    (
+        Box<dyn Subscriber + Send + Sync + 'static>,
+        SdkTracerProvider,
+    ),
+    InitializationError,
+> {
+    // OpenTelemetry env vars that should be set at a minimum
+    let env_vars = vec![
+        "OTEL_SERVICE_NAME",
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_HEADERS",
+    ];
+    for var in env_vars {
+        let _ = env::var(var).map_err(|_| MissingEnvVar(var.to_string()));
+    }
+
+    let exporter = opentelemetry_otlp::SpanExporterBuilder::default()
+        .with_tonic()
+        .with_tls_config(tonic::transport::ClientTlsConfig::new().with_native_roots())
+        .build()
+        .expect("Failed to create OTLP exporter");
+
+    let detectors: Vec<Box<dyn ResourceDetector>> = vec![
+        Box::new(SdkProvidedResourceDetector),
+        Box::new(EnvResourceDetector::new()),
+        Box::new(ProcessResourceDetector),
+    ];
+    let resource = Resource::builder().with_detectors(&detectors).build();
+
+    let tracer_provider = SdkTracerProvider::builder()
+        .with_resource(resource)
+        .with_batch_exporter(exporter)
+        .build();
+
+    let telemetry_layer =
+        tracing_opentelemetry::layer().with_tracer(tracer_provider.tracer(name.to_string()));
+
+    let fmt_layer = Layer::new()
+        .compact()
+        .with_file(true)
+        .with_line_number(true);
+
+    let env_filter_layer =
+        EnvFilter::try_from_default_env().expect("failed to get RUST_LOG from env");
+
+    let subscriber = Registry::default()
+        .with(env_filter_layer)
+        .with(fmt_layer)
+        .with(telemetry_layer);
+
+    Ok((Box::new(subscriber), tracer_provider))
 }

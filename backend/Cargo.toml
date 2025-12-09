@@ -6,18 +6,24 @@ resolver = "2"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 chrono = { version = "0.4.42", features = ["serde"] }
-tracing = "0.1.41"
-tracing-subscriber = { version = "0.3.20", features = ["json", "env-filter"] }
-tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros", "signal"] }
+tracing = "0.1.43"
+tracing-subscriber = { version = "0.3.22", features = ["json", "env-filter"] }
+tokio = { version = "1.48.0", features = ["full"] }
 figment = { version = "0.10.19", features = ["toml", "env"] }
-reqwest = { version = "0.12.24", features = ["json"] }
+reqwest = { version = "0.12.25", features = ["json"] }
 sqlx = { version = "0.8.3", features = ["runtime-tokio", "tls-native-tls", "postgres", "migrate", "chrono", "uuid", "json"] }
 thiserror = "2.0.17"
-uuid = { version = "1.18.1", features = ["v7", "serde"] }
+uuid = { version = "1.19.0", features = ["v7", "serde"] }
 zstd = "0.13.3"
 axum = "0.8.7"
 parking_lot = "0.12.5"
 tokio-util = "0.7.17"
-tower-http = { version = "0.6.2", features = ["cors"] }
+tower-http = { version = "0.6.8", features = ["cors"] }
 specta = { version = "2.0.0-rc.22", features = ["chrono", "derive", "export"] }
 specta-typescript = "0.0.9"
+opentelemetry = { version = "0.31.0", features = ["trace"] }
+opentelemetry_sdk = { version = "0.31.0", features = ["trace", "rt-tokio"] }
+opentelemetry-otlp = { version = "0.31.0", features = ["grpc-tonic", "trace", "tls-roots"] }
+tonic = { version = "0.14.2" }
+opentelemetry-resource-detectors = { version = "0.10.0" }
+tracing-opentelemetry = "0.32.0"

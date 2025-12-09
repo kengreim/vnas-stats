@@ -8,12 +8,14 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use chrono::{DateTime, Utc};
 use model::{FlatFacility, FlatPosition};
+
 use reqwest::Client;
 use shared::error::InitializationError;
 use shared::vnas::api::minimal::Facility as MinimalFacility;
 use shared::vnas::api::minimal::{ArtccRoot as MinimalArtccRoot, ArtccRoot};
-use shared::{initialize_db, load_config};
+use shared::{init_tracing_and_oltp, initialize_db, load_config};
 use sqlx::{Pool, Postgres, Row};
+use std::env;
 use thiserror::Error;
 use tracing::{debug, error, info};
 use tracing_subscriber::fmt::Layer;
@@ -28,23 +30,7 @@ pub struct AxumState {
 
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
-    let fmt_subscriber = tracing_subscriber::fmt()
-        .compact()
-        .with_file(true)
-        .with_line_number(true)
-        .with_env_filter(EnvFilter::from_default_env())
-        .finish();
-
-    let fmt_layer = Layer::new()
-        .compact()
-        .with_file(true)
-        .with_line_number(true);
-
-    let env_filter_layer =
-        EnvFilter::try_from_default_env().expect("failed to get RUST_LOG from env");
-
-    let subscriber = Registry::default().with(env_filter_layer).with(fmt_layer);
-
+    let (subscriber, tracer_provider) = init_tracing_and_oltp("artcc_updater")?;
     tracing::subscriber::set_global_default(subscriber).map_err(InitializationError::from)?;
 
     let config = load_config().map_err(InitializationError::from)?;
@@ -63,6 +49,10 @@ async fn main() -> Result<(), AppError> {
         .with_graceful_shutdown(shared::shutdown_listener(None))
         .await
         .unwrap();
+
+    if let Err(e) = tracer_provider.shutdown() {
+        eprintln!("failed to shut down tracer provider: {e:?}");
+    }
 
     Ok(())
 }
