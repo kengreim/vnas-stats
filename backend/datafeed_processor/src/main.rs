@@ -26,7 +26,7 @@ use chrono::{DateTime, Utc};
 use parking_lot::RwLock;
 use shared::error::InitializationError;
 use shared::vnas::datafeed::DatafeedRoot;
-use shared::{initialize_db, load_config, shutdown_listener};
+use shared::{init_tracing_and_oltp, initialize_db, load_config, shutdown_listener};
 use sqlx::postgres::PgListener;
 use sqlx::{Pool, Postgres};
 use std::collections::HashSet;
@@ -35,18 +35,11 @@ use tokio::net::TcpListener;
 use tokio::time::{Duration, sleep};
 use tokio_util::sync::CancellationToken;
 use tracing::{Level, debug, event_enabled, info, trace, warn};
-use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
 #[tokio::main]
 async fn main() -> Result<(), ProcessorMainError> {
-    let subscriber = tracing_subscriber::fmt()
-        .compact()
-        .with_file(true)
-        .with_line_number(true)
-        .with_env_filter(EnvFilter::from_default_env())
-        .finish();
-
+    let (subscriber, tracer_provider) = init_tracing_and_oltp("datafeed_processor")?;
     tracing::subscriber::set_global_default(subscriber).map_err(InitializationError::from)?;
 
     // Set up config

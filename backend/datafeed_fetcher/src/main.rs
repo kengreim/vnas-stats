@@ -11,7 +11,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use parking_lot::RwLock;
 use serde_json::Value;
 use shared::error::InitializationError;
-use shared::shutdown_listener;
+use shared::{init_tracing_and_oltp, shutdown_listener};
 use shared::vnas::datafeed::{VnasEnvironment, datafeed_url};
 use shared::{initialize_db, load_config};
 use sqlx::{Pool, Postgres};
@@ -21,19 +21,12 @@ use tokio::net::TcpListener;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
-use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
 #[tokio::main]
 async fn main() -> Result<(), MainError> {
-    let subscriber = tracing_subscriber::fmt()
-        .compact()
-        .with_file(true)
-        .with_line_number(true)
-        .with_env_filter(EnvFilter::from_default_env())
-        .finish();
-
-    tracing::subscriber::set_global_default(subscriber).map_err(InitializationError::Tracing)?;
+    let (subscriber, tracer_provider) = init_tracing_and_oltp("datafeed_fetcher")?;
+    tracing::subscriber::set_global_default(subscriber).map_err(InitializationError::from)?;
 
     // Set up config
     let config = load_config().unwrap_or_else(|e| {
