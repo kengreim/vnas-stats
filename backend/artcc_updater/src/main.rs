@@ -27,8 +27,7 @@ pub struct AxumState {
 
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
-    let (subscriber, tracer_provider) = init_tracing_and_oltp("artcc_updater")?;
-    tracing::subscriber::set_global_default(subscriber).map_err(InitializationError::from)?;
+    let tracer_provider = init_tracing_and_oltp("artcc_updater")?;
 
     let config = load_config().map_err(InitializationError::from)?;
     info!(config = ?config, "config loaded");

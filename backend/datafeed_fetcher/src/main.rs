@@ -10,9 +10,8 @@ use axum::routing::get;
 use chrono::{DateTime, TimeDelta, Utc};
 use parking_lot::RwLock;
 use serde_json::Value;
-use shared::error::InitializationError;
-use shared::shutdown_listener;
 use shared::vnas::datafeed::{VnasEnvironment, datafeed_url};
+use shared::{init_tracing_and_oltp, shutdown_listener};
 use shared::{initialize_db, load_config};
 use sqlx::{Pool, Postgres};
 use std::sync::Arc;
@@ -20,20 +19,12 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, warn};
-use tracing_subscriber::EnvFilter;
+use tracing::{debug, debug_span, error, info, instrument, warn};
 use uuid::Uuid;
 
 #[tokio::main]
 async fn main() -> Result<(), MainError> {
-    let subscriber = tracing_subscriber::fmt()
-        .compact()
-        .with_file(true)
-        .with_line_number(true)
-        .with_env_filter(EnvFilter::from_default_env())
-        .finish();
-
-    tracing::subscriber::set_global_default(subscriber).map_err(InitializationError::Tracing)?;
+    let tracer_provider = init_tracing_and_oltp("artcc_updater")?;
 
     // Set up config
     let config = load_config().unwrap_or_else(|e| {
@@ -154,6 +145,10 @@ async fn main() -> Result<(), MainError> {
         }
     }
 
+    if let Err(e) = tracer_provider.shutdown() {
+        eprintln!("failed to shut down tracer provider: {e:?}");
+    }
+
     if let Some(err) = first_err {
         Err(err)
     } else {
@@ -175,6 +170,8 @@ async fn fetcher_loop(
     info!("initialized Datafeed Fetcher");
     let mut initial_loop = true;
     loop {
+        let span = debug_span!("datafeed fetcher main loop");
+        let _enter = span.enter();
         if initial_loop {
             initial_loop = false;
         } else {
@@ -289,6 +286,7 @@ async fn health_check(State(state): State<AxumState>) -> impl IntoResponse {
     }
 }
 
+#[instrument(skip(client))]
 async fn fetch_datafeed(client: &reqwest::Client) -> Result<(Value, DateTime<Utc>), FetchError> {
     let resp = client
         .get(datafeed_url(VnasEnvironment::Live))
@@ -309,6 +307,7 @@ async fn fetch_datafeed(client: &reqwest::Client) -> Result<(Value, DateTime<Utc
     }
 }
 
+#[instrument(skip(pool, payload))]
 async fn enqueue_datafeed(
     pool: &Pool<Postgres>,
     payload: Value,

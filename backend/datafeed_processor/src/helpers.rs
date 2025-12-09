@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use shared::vnas::datafeed::Controller;
 use sqlx::{Postgres, Transaction};
 use std::collections::{HashMap, HashSet};
-use tracing::{Level, event_enabled, trace};
+use tracing::{Level, event_enabled, instrument, trace};
 use uuid::Uuid;
 
 type Callsign<'a> = (&'a str, Option<&'a str>, &'a str);
@@ -53,6 +53,7 @@ pub fn login_times_match(a: &DateTime<Utc>, b: &DateTime<Utc>) -> bool {
     a.timestamp_micros() == b.timestamp_micros()
 }
 
+#[instrument(skip(tx))]
 pub async fn load_active_state(
     tx: &mut Transaction<'_, Postgres>,
 ) -> Result<ActiveState, QueryError> {
@@ -151,6 +152,7 @@ pub enum ControllerCloseReason {
     DeactivatedPosition,
 }
 
+#[instrument(skip(tx, active_callsign_sessions_map))]
 pub async fn ensure_callsign_session(
     tx: &mut Transaction<'_, Postgres>,
     active_callsign_sessions_map: &mut HashMap<(String, String), Uuid>,
@@ -168,6 +170,7 @@ pub async fn ensure_callsign_session(
     Ok((id, true))
 }
 
+#[instrument(skip(tx, active_position_sessions))]
 pub async fn ensure_position_session(
     tx: &mut Transaction<'_, Postgres>,
     active_position_sessions: &mut HashMap<String, Uuid>,
@@ -203,6 +206,7 @@ pub async fn ensure_position_session(
 //     complete_controller_sessions(tx.as_mut(), controllers_to_complete, ended_at).await
 // }
 
+#[instrument(skip(tx, active_callsign_sessions, active_callsign_ids))]
 pub async fn finalize_callsign_sessions(
     tx: &mut Transaction<'_, Postgres>,
     active_callsign_sessions: &HashSet<Uuid>,
@@ -228,6 +232,7 @@ pub async fn finalize_callsign_sessions(
     Ok(to_close_callsign)
 }
 
+#[instrument(skip(tx, active_position_sessions, active_position_ids))]
 pub async fn finalize_position_sessions(
     tx: &mut Transaction<'_, Postgres>,
     active_position_sessions: &HashMap<String, Uuid>,

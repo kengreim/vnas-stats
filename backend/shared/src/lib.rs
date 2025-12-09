@@ -4,23 +4,28 @@ use crate::error::InitializationError::MissingEnvVar;
 use crate::error::{ConfigError, InitializationError};
 use figment::Figment;
 use figment::providers::{Env, Format, Toml};
+use opentelemetry::global;
 use opentelemetry::trace::TracerProvider;
+use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_otlp::WithTonicConfig;
 use opentelemetry_resource_detectors::ProcessResourceDetector;
 use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::resource::{
     EnvResourceDetector, ResourceDetector, SdkProvidedResourceDetector,
 };
 use opentelemetry_sdk::trace::SdkTracerProvider;
+use opentelemetry_stdout::LogExporter;
 use serde::Deserialize;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Pool, Postgres};
 use std::env;
 use tokio::signal;
 use tokio_util::sync::CancellationToken;
-use tracing::{Subscriber, info};
+use tracing::info;
 use tracing_subscriber::fmt::Layer;
 use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Registry};
 
 pub const DATAFEED_QUEUE_NAME: &str = "vnas_stats";
@@ -113,13 +118,7 @@ pub async fn shutdown_listener(token: Option<CancellationToken>) {
 
 pub fn init_tracing_and_oltp(
     name: impl ToString,
-) -> Result<
-    (
-        Box<dyn Subscriber + Send + Sync + 'static>,
-        SdkTracerProvider,
-    ),
-    InitializationError,
-> {
+) -> Result<SdkTracerProvider, InitializationError> {
     // OpenTelemetry env vars that should be set at a minimum
     let env_vars = vec![
         "OTEL_SERVICE_NAME",
@@ -130,6 +129,7 @@ pub fn init_tracing_and_oltp(
         let _ = env::var(var).map_err(|_| MissingEnvVar(var.to_string()));
     }
 
+    // tracing_opentelemetry setup for spans
     let exporter = opentelemetry_otlp::SpanExporterBuilder::default()
         .with_tonic()
         .with_tls_config(tonic::transport::ClientTlsConfig::new().with_native_roots())
@@ -147,10 +147,20 @@ pub fn init_tracing_and_oltp(
         .with_resource(resource)
         .with_batch_exporter(exporter)
         .build();
+    let tracer = tracer_provider.tracer(name.to_string());
+    global::set_tracer_provider(tracer_provider.clone());
 
-    let telemetry_layer =
-        tracing_opentelemetry::layer().with_tracer(tracer_provider.tracer(name.to_string()));
+    let telemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
 
+    // opentelemetry_appender_tracing setup for logs
+    let log_exporter = LogExporter::default();
+    let logger_provider = SdkLoggerProvider::builder()
+        .with_simple_exporter(log_exporter)
+        .build();
+
+    let otel_log_layer = OpenTelemetryTracingBridge::new(&logger_provider);
+
+    // Standard console format and env filter layers
     let fmt_layer = Layer::new()
         .compact()
         .with_file(true)
@@ -159,10 +169,12 @@ pub fn init_tracing_and_oltp(
     let env_filter_layer =
         EnvFilter::try_from_default_env().expect("failed to get RUST_LOG from env");
 
-    let subscriber = Registry::default()
+    Registry::default()
         .with(env_filter_layer)
         .with(fmt_layer)
-        .with(telemetry_layer);
+        .with(otel_log_layer)
+        .with(telemetry_layer)
+        .init();
 
-    Ok((Box::new(subscriber), tracer_provider))
+    Ok(tracer_provider)
 }

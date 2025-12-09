@@ -19,6 +19,8 @@ tonic.workspace = true
 opentelemetry-resource-detectors.workspace = true
 tracing-opentelemetry.workspace = true
 tracing-subscriber.workspace = true
+opentelemetry-appender-tracing.workspace = true
+opentelemetry-stdout.workspace = true
 
 [dev-dependencies]
 reqwest.workspace = true
