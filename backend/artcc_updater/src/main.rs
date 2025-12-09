@@ -15,12 +15,9 @@ use shared::vnas::api::minimal::Facility as MinimalFacility;
 use shared::vnas::api::minimal::{ArtccRoot as MinimalArtccRoot, ArtccRoot};
 use shared::{init_tracing_and_oltp, initialize_db, load_config};
 use sqlx::{Pool, Postgres, Row};
-use std::env;
 use thiserror::Error;
-use tracing::{debug, error, info};
-use tracing_subscriber::fmt::Layer;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::{EnvFilter, Registry};
+use tower_http::trace::TraceLayer;
+use tracing::{debug, error, info, instrument};
 
 #[derive(Clone)]
 pub struct AxumState {
@@ -41,6 +38,7 @@ async fn main() -> Result<(), AppError> {
     let app = Router::new()
         .route("/health", get(health_check))
         .route("/update", get(update_data))
+        .layer(TraceLayer::new_for_http())
         .with_state(AxumState { client, db_pool });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
         .await
@@ -61,6 +59,7 @@ async fn health_check() -> impl IntoResponse {
     (StatusCode::OK, "Service is healthy!")
 }
 
+#[instrument(skip(state))]
 async fn update_data(State(state): State<AxumState>) -> impl IntoResponse {
     let res = fetch_and_process(&state.client, &state.db_pool).await;
     match res {
@@ -75,12 +74,14 @@ async fn update_data(State(state): State<AxumState>) -> impl IntoResponse {
     }
 }
 
+#[instrument(skip(client, pool))]
 async fn fetch_and_process(client: &Client, pool: &Pool<Postgres>) -> Result<(), AppError> {
     let artccs = fetch_artccs(client).await?;
     process_artccs(pool, artccs).await?;
     Ok(())
 }
 
+#[instrument(skip(client))]
 async fn fetch_artccs(client: &Client) -> Result<Vec<MinimalArtccRoot>, AppError> {
     debug!("fetching all ARTCCs data from vNAS API");
     let resp = client
@@ -125,6 +126,7 @@ async fn find_artccs_to_update<'a>(
         .collect())
 }
 
+#[instrument(skip(pool, artccs))]
 async fn process_artccs(
     pool: &Pool<Postgres>,
     artccs: Vec<MinimalArtccRoot>,

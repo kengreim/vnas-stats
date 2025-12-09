@@ -49,6 +49,7 @@ dependencies = [
  "sqlx",
  "thiserror 2.0.17",
  "tokio",
+ "tower-http",
  "tracing",
  "tracing-subscriber",
 ]
@@ -2703,6 +2704,7 @@ dependencies = [
  "tower",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]

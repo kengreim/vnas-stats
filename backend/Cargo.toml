@@ -18,7 +18,7 @@ zstd = "0.13.3"
 axum = "0.8.7"
 parking_lot = "0.12.5"
 tokio-util = "0.7.17"
-tower-http = { version = "0.6.8", features = ["cors"] }
+tower-http = { version = "0.6.8", features = ["cors", "trace"] }
 specta = { version = "2.0.0-rc.22", features = ["chrono", "derive", "export"] }
 specta-typescript = "0.0.9"
 opentelemetry = { version = "0.31.0", features = ["trace"] }
