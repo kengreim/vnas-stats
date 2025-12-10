@@ -23,6 +23,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use chrono::{DateTime, Utc};
+use opentelemetry::{KeyValue, global};
 use parking_lot::RwLock;
 use shared::error::InitializationError;
 use shared::vnas::datafeed::DatafeedRoot;
@@ -570,6 +571,13 @@ async fn process_datafeed_payload(
         &closed_position_session_ids,
     )
     .await?;
+
+    let meter = global::meter("datafeed_processor");
+    let datafeeds_processed_counter = meter.u64_counter("datafeeds_processed_total").build();
+    datafeeds_processed_counter.add(
+        1,
+        &[KeyValue::new("updated_at", datafeed.updated_at.to_string())],
+    );
 
     Ok(())
 }

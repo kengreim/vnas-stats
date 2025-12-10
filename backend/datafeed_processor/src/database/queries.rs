@@ -3,6 +3,8 @@ use crate::database::models::{
     UserRating,
 };
 use chrono::{DateTime, Utc};
+use opentelemetry::metrics;
+use opentelemetry::{KeyValue, global};
 use shared::vnas::datafeed::Controller;
 use sqlx::{Executor, Postgres};
 use std::num::TryFromIntError;
@@ -67,6 +69,7 @@ where
     let payload_bytes = serde_json::to_vec(&message.payload)?;
     let original_size = i32::try_from(payload_bytes.len()).map_err(QueryError::PayloadTooLarge)?;
     let payload_compressed = zstd::encode_all(payload_bytes.as_slice(), 3)?;
+    let payload_compressed_size = payload_compressed.len();
 
     if let Some(id) = sqlx::query_scalar::<_, Uuid>(
         r"
@@ -99,6 +102,25 @@ where
             .bind(message.updated_at)
             .fetch_one(&mut *executor)
             .await?;
+
+    // Add metrics to track size of datafeeds
+    let meter = global::meter("datafeed_processor");
+    let datafeeds_bytes_uncompressed_counter = meter
+        .u64_counter("datafeeds_bytes_uncompressed_total")
+        .with_unit("B")
+        .build();
+    let datafeeds_bytes_compressed_counter = meter
+        .u64_counter("datafeeds_bytes_compressed_total")
+        .with_unit("B")
+        .build();
+    datafeeds_bytes_uncompressed_counter.add(
+        original_size as u64,
+        &[KeyValue::new("updated_at", message.updated_at.to_string())],
+    );
+    datafeeds_bytes_compressed_counter.add(
+        payload_compressed_size as u64,
+        &[KeyValue::new("updated_at", message.updated_at.to_string())],
+    );
 
     Ok((existing_id, false))
 }

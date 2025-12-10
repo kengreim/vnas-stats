@@ -7,10 +7,13 @@ use figment::providers::{Env, Format, Toml};
 use opentelemetry::global;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
-use opentelemetry_otlp::{LogExporterBuilder, WithTonicConfig};
+use opentelemetry_otlp::{
+    LogExporterBuilder, MetricExporter, MetricExporterBuilder, WithTonicConfig,
+};
 use opentelemetry_resource_detectors::ProcessResourceDetector;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
+use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::resource::{
     EnvResourceDetector, ResourceDetector, SdkProvidedResourceDetector,
 };
@@ -166,6 +169,18 @@ pub fn init_tracing_and_oltp(
         .build();
 
     let otel_log_layer = OpenTelemetryTracingBridge::new(&logger_provider);
+
+    // Setup for OTel Metrics
+    let meter_exporter = MetricExporterBuilder::new()
+        .with_tonic()
+        .with_tls_config(tonic::transport::ClientTlsConfig::new().with_native_roots())
+        .build()
+        .expect("Failed to create OTLP metric exporter");
+
+    let meter_provider = SdkMeterProvider::builder()
+        .with_periodic_exporter(meter_exporter)
+        .build();
+    global::set_meter_provider(meter_provider.clone());
 
     // Standard console format and env filter layers
     let fmt_layer = Layer::new()

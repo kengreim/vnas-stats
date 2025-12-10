@@ -21,9 +21,9 @@ tokio-util = "0.7.17"
 tower-http = { version = "0.6.8", features = ["cors", "trace"] }
 specta = { version = "2.0.0-rc.22", features = ["chrono", "derive", "export"] }
 specta-typescript = "0.0.9"
-opentelemetry = { version = "0.31.0", features = ["trace", "logs"] }
-opentelemetry_sdk = { version = "0.31.0", features = ["trace", "rt-tokio", "logs"] }
-opentelemetry-otlp = { version = "0.31.0", features = ["grpc-tonic", "trace", "tls-roots"] }
+opentelemetry = { version = "0.31.0", features = ["trace", "logs", "metrics"] }
+opentelemetry_sdk = { version = "0.31.0", features = ["trace", "rt-tokio", "logs", "metrics"] }
+opentelemetry-otlp = { version = "0.31.0", features = ["grpc-tonic", "trace", "tls-roots", "metrics"] }
 tonic = { version = "0.14.2" }
 opentelemetry-resource-detectors = { version = "0.10.0" }
 tracing-opentelemetry = "0.32.0"

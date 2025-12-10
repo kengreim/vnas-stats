@@ -367,7 +367,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
- "tracing-subscriber",
  "uuid",
 ]
 
@@ -377,6 +376,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "chrono",
+ "opentelemetry",
  "parking_lot",
  "serde",
  "serde_json",
@@ -386,7 +386,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
- "tracing-subscriber",
  "uuid",
  "zstd",
 ]
