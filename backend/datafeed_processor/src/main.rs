@@ -323,6 +323,7 @@ async fn process_datafeed_payload(
         active_callsign_sessions_map: existing_active_callsign_sessions_map,
         active_position_sessions: existing_active_position_sessions,
     } = &mut existing_state;
+    let mut active_controller_session_ids: HashSet<Uuid> = HashSet::new();
     let mut active_callsign_ids: HashSet<Uuid> = HashSet::new();
     let mut active_position_ids: HashSet<String> = HashSet::new();
     let mut new_callsign_session_ids: HashSet<Uuid> = HashSet::new();
@@ -499,6 +500,7 @@ async fn process_datafeed_payload(
                     datafeed.updated_at,
                 )
                 .await?;
+                active_controller_session_ids.insert(*session_id);
                 active_callsign_ids.insert(*callsign_session_id);
                 active_position_ids.insert(controller.primary_position_id.clone());
             }
@@ -530,7 +532,7 @@ async fn process_datafeed_payload(
                     new_position_session_ids.insert(position_session_id);
                 }
 
-                insert_controller_session(
+                let controller_session_id = insert_controller_session(
                     tx.as_mut(),
                     controller,
                     *cid,
@@ -539,6 +541,7 @@ async fn process_datafeed_payload(
                     position_session_id,
                 )
                 .await?;
+                active_controller_session_ids.insert(controller_session_id);
                 active_callsign_ids.insert(callsign_session_id);
                 active_position_ids.insert(position_id.to_string());
             }
@@ -580,10 +583,20 @@ async fn process_datafeed_payload(
     )
     .await?;
 
-    metrics.datafeeds.processed.add(
-        1,
-        &[KeyValue::new("updated_at", datafeed.updated_at.to_string())],
-    );
+    let metrics_key = [KeyValue::new("updated_at", datafeed.updated_at.to_string())];
+    metrics.datafeeds.processed.add(1, &metrics_key);
+    metrics
+        .active
+        .controllers
+        .record(active_controller_session_ids.len() as u64, &metrics_key);
+    metrics
+        .active
+        .callsigns
+        .record(active_callsign_ids.len() as u64, &metrics_key);
+    metrics
+        .active
+        .positions
+        .record(active_position_ids.len() as u64, &metrics_key);
 
     Ok(())
 }
