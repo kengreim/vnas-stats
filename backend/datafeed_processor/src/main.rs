@@ -3,6 +3,7 @@ mod database;
 mod error;
 mod helpers;
 mod logging;
+mod metrics;
 
 use crate::database::queries::{
     complete_controller_sessions, delete_queued_datafeed, fetch_datafeed_batch,
@@ -17,13 +18,14 @@ use crate::helpers::{
     load_active_state, login_times_match, parse_controller_parts,
 };
 use crate::logging::debug_log_sessions_changes;
+use crate::metrics::Metrics;
 use axum::Router;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use chrono::{DateTime, Utc};
-use opentelemetry::{KeyValue, global};
+use opentelemetry::KeyValue;
 use parking_lot::RwLock;
 use shared::error::InitializationError;
 use shared::vnas::datafeed::DatafeedRoot;
@@ -173,7 +175,7 @@ async fn run_health_server(
         .with_state(AxumState {
             last_processed_datafeed,
         });
-    let listener = TcpListener::bind("127.0.0.1:3000").await.unwrap();
+    let listener = TcpListener::bind("127.0.0.1:3000").await?;
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown.cancelled_owned())
         .await?;
@@ -197,9 +199,12 @@ async fn run_datafeed_processing_loop(
     last_processed_datafeed: Arc<RwLock<Option<DateTime<Utc>>>>,
     shutdown: CancellationToken,
 ) -> Result<(), ProcessorMainError> {
+    // Initialize metrics
+    let metrics = Metrics::default();
+
     // Process any backlog before listening
     info!(name: "processing.backlog.started", "starting processing backlog of queued datafeeds");
-    process_pending_datafeeds(&db_pool, &last_processed_datafeed, 25)
+    process_pending_datafeeds(&db_pool, &last_processed_datafeed, 25, &metrics)
         .instrument(info_span!("process_backlog"))
         .await?;
     info!(name: "processing.backlog.completed", "completed processing backlog of queued datafeeds");
@@ -225,7 +230,7 @@ async fn run_datafeed_processing_loop(
                     Ok(notification) => {
                         trace!(name:"datafeed_loop.listener.received", payload = notification.payload(), "received datafeed notification");
                         // Process pending datafeeds; if this fails, propagate the error after finishing this payload.
-                        process_pending_datafeeds(&db_pool, &last_processed_datafeed, 10).await?;
+                        process_pending_datafeeds(&db_pool, &last_processed_datafeed, 10, &metrics).await?;
                     }
                     Err(e) => {
                         warn!(name:"datafeed_loop.listener.received", error = ?e, "error receiving Postgres notification");
@@ -239,11 +244,12 @@ async fn run_datafeed_processing_loop(
     Ok(())
 }
 
-#[instrument(skip(pool, last_processed_datafeed))]
+#[instrument(skip(pool, last_processed_datafeed, metrics))]
 async fn process_pending_datafeeds(
     pool: &Pool<Postgres>,
     last_processed_datafeed: &RwLock<Option<DateTime<Utc>>>,
     limit: i64,
+    metrics: &Metrics,
 ) -> Result<(), BacklogProcessingError> {
     loop {
         let mut tx = pool.begin().await.map_err(BacklogProcessingError::from)?;
@@ -266,11 +272,12 @@ async fn process_pending_datafeeds(
             };
 
             // Upsert payload; if not inserted (already seen), skip session processing.
-            let (payload_id, new_payload) = upsert_datafeed_payload(tx.as_mut(), &message).await?;
+            let (payload_id, new_payload) =
+                upsert_datafeed_payload(tx.as_mut(), &message, &metrics.datafeeds).await?;
 
             if new_payload {
                 debug!(name: "datafeed.inspected.found_new", updated_at = ?datafeed_root.updated_at, "new datafeed update received");
-                if let Err(e) = process_datafeed_payload(pool, &datafeed_root).await {
+                if let Err(e) = process_datafeed_payload(pool, &datafeed_root, &metrics).await {
                     tx.rollback().await?;
                     return Err(e.into());
                 }
@@ -301,10 +308,11 @@ async fn process_pending_datafeeds(
     Ok(())
 }
 
-#[instrument(skip(pool, datafeed))]
+#[instrument(skip(pool, datafeed, metrics))]
 async fn process_datafeed_payload(
     pool: &Pool<Postgres>,
     datafeed: &DatafeedRoot,
+    metrics: &Metrics,
 ) -> Result<(), PayloadProcessingError> {
     let mut tx = pool.begin().await?;
 
@@ -572,9 +580,7 @@ async fn process_datafeed_payload(
     )
     .await?;
 
-    let meter = global::meter("datafeed_processor");
-    let datafeeds_processed_counter = meter.u64_counter("datafeeds_processed_total").build();
-    datafeeds_processed_counter.add(
+    metrics.datafeeds.processed.add(
         1,
         &[KeyValue::new("updated_at", datafeed.updated_at.to_string())],
     );

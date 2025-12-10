@@ -7,9 +7,7 @@ use figment::providers::{Env, Format, Toml};
 use opentelemetry::global;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
-use opentelemetry_otlp::{
-    LogExporterBuilder, MetricExporter, MetricExporterBuilder, WithTonicConfig,
-};
+use opentelemetry_otlp::{LogExporterBuilder, MetricExporterBuilder, WithTonicConfig};
 use opentelemetry_resource_detectors::ProcessResourceDetector;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::SdkLoggerProvider;

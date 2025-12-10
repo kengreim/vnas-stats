@@ -2,8 +2,8 @@ use crate::database::models::{
     ActiveSessionKey, CallsignSession, PositionSession, PositionSessionDetails, QueuedDatafeed,
     UserRating,
 };
+use crate::metrics::DatafeedsMetrics;
 use chrono::{DateTime, Utc};
-use opentelemetry::metrics;
 use opentelemetry::{KeyValue, global};
 use shared::vnas::datafeed::Controller;
 use sqlx::{Executor, Postgres};
@@ -58,10 +58,11 @@ where
 
 /// Returns a tuple `(Uuid, bool)` where the Uuid is the payload primary key in the
 /// database and the bool indicates whether a new row was inserted
-#[instrument(level = "debug", skip(executor, message))]
+#[instrument(level = "debug", skip(executor, message, metrics))]
 pub async fn upsert_datafeed_payload<'e, E>(
     executor: &mut E,
     message: &QueuedDatafeed,
+    metrics: &DatafeedsMetrics,
 ) -> Result<(Uuid, bool), QueryError>
 where
     for<'c> &'c mut E: Executor<'c, Database = Postgres>,
@@ -104,20 +105,11 @@ where
             .await?;
 
     // Add metrics to track size of datafeeds
-    let meter = global::meter("datafeed_processor");
-    let datafeeds_bytes_uncompressed_counter = meter
-        .u64_counter("datafeeds_bytes_uncompressed_total")
-        .with_unit("B")
-        .build();
-    let datafeeds_bytes_compressed_counter = meter
-        .u64_counter("datafeeds_bytes_compressed_total")
-        .with_unit("B")
-        .build();
-    datafeeds_bytes_uncompressed_counter.add(
+    metrics.bytes_uncompressed.add(
         original_size as u64,
         &[KeyValue::new("updated_at", message.updated_at.to_string())],
     );
-    datafeeds_bytes_compressed_counter.add(
+    metrics.bytes_compressed.add(
         payload_compressed_size as u64,
         &[KeyValue::new("updated_at", message.updated_at.to_string())],
     );
