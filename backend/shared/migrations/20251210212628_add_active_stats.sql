@@ -1,7 +1,7 @@
 -- Store per-datafeed snapshots of active session counts.
 
 CREATE TABLE IF NOT EXISTS session_activity_stats (
-    id uuid PRIMARY KEY DEFAULT uuid_generate_v7(),
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
     observed_at timestamptz NOT NULL,
     active_controllers integer NOT NULL,
     active_callsigns integer NOT NULL,
