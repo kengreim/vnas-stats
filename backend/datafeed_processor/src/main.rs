@@ -7,8 +7,9 @@ mod metrics;
 
 use crate::database::queries::{
     complete_controller_sessions, delete_queued_datafeed, fetch_datafeed_batch,
-    insert_controller_session, insert_datafeed_message, update_active_controller_session,
-    update_callsign_session_last_seen, update_position_session_last_seen, upsert_datafeed_payload,
+    insert_controller_session, insert_datafeed_message, insert_session_activity_stats,
+    update_active_controller_session, update_callsign_session_last_seen,
+    update_position_session_last_seen, upsert_datafeed_payload,
 };
 use crate::error::{BacklogProcessingError, PayloadProcessingError, ProcessorMainError};
 use crate::helpers::ControllerCloseReason;
@@ -568,6 +569,15 @@ async fn process_datafeed_payload(
     )
     .await?;
     trace!(name: "datafeed.processed.positions.completed", "completed processing position sessions");
+
+    insert_session_activity_stats(
+        tx.as_mut(),
+        datafeed.updated_at,
+        active_controller_session_ids.len() as i64,
+        active_callsign_ids.len() as i64,
+        active_position_ids.len() as i64,
+    )
+    .await?;
 
     tx.commit().await?;
 

@@ -608,3 +608,36 @@ where
 
     Ok(result.rows_affected())
 }
+
+#[instrument(level = "debug", skip(executor))]
+pub async fn insert_session_activity_stats<'e, E>(
+    executor: E,
+    observed_at: DateTime<Utc>,
+    active_controllers: i64,
+    active_callsigns: i64,
+    active_positions: i64,
+) -> Result<(), QueryError>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    sqlx::query(
+        r#"
+        INSERT INTO session_activity_stats (
+            observed_at,
+            active_controllers,
+            active_callsigns,
+            active_positions
+        )
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (observed_at) DO NOTHING
+        "#,
+    )
+    .bind(observed_at)
+    .bind(active_controllers)
+    .bind(active_callsigns)
+    .bind(active_positions)
+    .execute(executor)
+    .await
+    .map(|_| ())
+    .map_err(QueryError::from)
+}
