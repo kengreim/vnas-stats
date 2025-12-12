@@ -50,7 +50,7 @@ async fn main() -> Result<(), ProcessorMainError> {
     info!(name: "config.loaded", config = ?config, "config loaded");
 
     // Initialize DB
-    let db_pool = initialize_db(&config.postgres).await?;
+    let db_pool = initialize_db(&config.postgres, true).await?;
 
     // Arc for state for health check endpoint
     let last_processed_datafeed = Arc::new(RwLock::new(None));

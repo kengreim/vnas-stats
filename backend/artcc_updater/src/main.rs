@@ -31,7 +31,7 @@ async fn main() -> Result<(), AppError> {
 
     let config = load_config().map_err(InitializationError::from)?;
     info!(name: "config.loaded", config = ?config, "config loaded");
-    let db_pool = initialize_db(&config.postgres).await?;
+    let db_pool = initialize_db(&config.postgres, true).await?;
     let client = Client::new();
 
     let app = Router::new()

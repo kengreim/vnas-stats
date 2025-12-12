@@ -83,6 +83,7 @@ pub mod error {
 #[instrument]
 pub async fn initialize_db(
     pg_config: &PostgresConfig,
+    migrate: bool,
 ) -> Result<Pool<Postgres>, InitializationError> {
     let pool = PgPoolOptions::new()
         .max_connections(5)
@@ -92,7 +93,9 @@ pub async fn initialize_db(
     info!(name: "db.connected", "db pool created and connected");
 
     // Run any new migrations
-    sqlx::migrate!("./migrations").run(&pool).await?;
+    if migrate {
+        sqlx::migrate!("./migrations").run(&pool).await?;
+    }
 
     Ok(pool)
 }

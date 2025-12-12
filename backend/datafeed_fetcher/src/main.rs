@@ -43,7 +43,7 @@ async fn main() -> Result<(), MainError> {
     });
     info!(name: "config.loaded", config = ?config, "config loaded");
 
-    let db_pool = initialize_db(&config.postgres).await?;
+    let db_pool = initialize_db(&config.postgres, true).await?;
 
     let interval_seconds = config.fetcher.map_or(15, |c| c.interval_seconds);
 
