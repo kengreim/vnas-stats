@@ -14,6 +14,7 @@ use shared::vnas::datafeed::{VnasEnvironment, datafeed_url};
 use shared::{init_tracing_and_oltp, shutdown_listener};
 use shared::{initialize_db, load_config};
 use sqlx::{Pool, Postgres};
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -21,6 +22,15 @@ use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
+
+#[derive(Clone)]
+struct FetcherState {
+    db_pool: Pool<Postgres>,
+    last_attempted_update: Arc<RwLock<Option<DateTime<Utc>>>>,
+    last_successful_update: Arc<RwLock<Option<DateTime<Utc>>>>,
+    last_error: Arc<RwLock<Option<EnqueueError>>>,
+    in_memory_queue: Arc<RwLock<VecDeque<(Value, DateTime<Utc>)>>>,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), MainError> {
@@ -35,33 +45,25 @@ async fn main() -> Result<(), MainError> {
 
     let db_pool = initialize_db(&config.postgres).await?;
 
-    let interval_seconds = if let Some(fetcher_config) = config.fetcher {
-        fetcher_config.interval_seconds
-    } else {
-        15
-    };
+    let interval_seconds = config.fetcher.map_or(15, |c| c.interval_seconds);
 
-    let last_attempted_update = Arc::new(RwLock::new(None));
-    let last_successful_update = Arc::new(RwLock::new(None));
-    let last_error = Arc::new(RwLock::new(None));
+    let state = FetcherState {
+        db_pool,
+        last_attempted_update: Arc::new(RwLock::new(None)),
+        last_successful_update: Arc::new(RwLock::new(None)),
+        last_error: Arc::new(RwLock::new(None)),
+        in_memory_queue: Arc::new(RwLock::new(VecDeque::new())),
+    };
 
     // Cancellation token shared across tasks; listener cancels on SIGINT/SIGTERM.
     let shutdown_token = CancellationToken::new();
     let mut signal_handle = tokio::spawn(shutdown_listener(Some(shutdown_token.clone())));
 
-    let mut axum_handle = tokio::spawn(run_health_server(
-        Arc::clone(&last_attempted_update),
-        Arc::clone(&last_successful_update),
-        Arc::clone(&last_error),
-        shutdown_token.clone(),
-    ));
+    let mut axum_handle = tokio::spawn(run_health_server(state.clone(), shutdown_token.clone()));
 
     let mut fetcher_handle = tokio::spawn(fetcher_loop(
-        db_pool,
+        state,
         interval_seconds,
-        last_attempted_update,
-        last_successful_update,
-        last_error,
         shutdown_token.clone(),
     ));
 
@@ -157,11 +159,8 @@ async fn main() -> Result<(), MainError> {
 }
 
 async fn fetcher_loop(
-    db_pool: Pool<Postgres>,
+    state: FetcherState,
     interval_seconds: u64,
-    last_attempted_update: Arc<RwLock<Option<DateTime<Utc>>>>,
-    last_successful_update: Arc<RwLock<Option<DateTime<Utc>>>>,
-    last_error: Arc<RwLock<Option<EnqueueError>>>,
     shutdown: CancellationToken,
 ) -> Result<(), EnqueueError> {
     // Default reqwest client
@@ -182,24 +181,35 @@ async fn fetcher_loop(
             }
         }
 
+        // Try to process in-memory queue first
+        process_in_memory_queue(&state).await;
+
         let now = Utc::now();
-        *last_attempted_update.write() = Some(now);
+        *state.last_attempted_update.write() = Some(now);
         let (payload, datafeed_updated_at) = match fetch_datafeed(&http_client).await {
             Ok((p, t)) => (p, t),
             Err(e) => {
                 warn!(name:"fetcher_loop.datafeed.received", error = ?e, "failed to fetch and deserialize datafeed");
-                *last_error.write() = Some(e.into());
+                *state.last_error.write() = Some(e.into());
                 continue;
             }
         };
         info!(updated_at = ?datafeed_updated_at, "fetched datafeed");
 
-        if let Err(e) = enqueue_datafeed(&db_pool, payload, datafeed_updated_at).await {
+        if let Err(e) = enqueue_datafeed(&state.db_pool, payload.clone(), datafeed_updated_at).await
+        {
             warn!(name:"fetcher_loop.datafeed.enqueued", error = ?e, "could not enqueue datafeed into Postgres");
-            *last_error.write() = Some(e);
-            continue;
+            *state.last_error.write() = Some(e);
+            state
+                .in_memory_queue
+                .write()
+                .push_back((payload, datafeed_updated_at));
+            info!(
+                name = "fetcher_loop.in_memory_queue.item_added",
+                "added item to in-memory queue"
+            );
         } else {
-            *last_successful_update.write() = Some(now);
+            *state.last_successful_update.write() = Some(now);
             debug!(name:"fetcher_loop.datafeed.enqueued", "enqueued datafeed into Postgres queue");
         }
 
@@ -213,27 +223,75 @@ async fn fetcher_loop(
     Ok(())
 }
 
-#[derive(Clone)]
-struct AxumState {
-    last_attempted_update: Arc<RwLock<Option<DateTime<Utc>>>>,
-    last_successful_update: Arc<RwLock<Option<DateTime<Utc>>>>,
-    last_error: Arc<RwLock<Option<EnqueueError>>>,
+async fn process_in_memory_queue(state: &FetcherState) {
+    let queue_len = state.in_memory_queue.read().len();
+    if queue_len == 0 {
+        return;
+    }
+
+    clear_in_memory_queue(state).await;
+}
+
+#[instrument(skip(state))]
+async fn clear_in_memory_queue(state: &FetcherState) {
+    let queue_len = state.in_memory_queue.read().len();
+    info!(
+        name = "fetcher_loop.in_memory_queue.processing.started",
+        count = queue_len,
+        "processing in-memory queue"
+    );
+
+    loop {
+        let item = state.in_memory_queue.write().pop_front();
+
+        if let Some((payload, datafeed_updated_at)) = item {
+            match enqueue_datafeed(&state.db_pool, payload.clone(), datafeed_updated_at).await {
+                Ok(()) => {
+                    info!(
+                        name = "fetcher_loop.in_memory_queue.processing.item",
+                        "processed item from in-memory queue"
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        name = "fetcher_loop.in_memory_queue.item",
+                        error = ?e,
+                        "failed to process item from in-memory queue, will retry later"
+                    );
+                    state
+                        .in_memory_queue
+                        .write()
+                        .push_front((payload, datafeed_updated_at));
+                    break;
+                }
+            }
+        } else {
+            break;
+        }
+    }
+    let queue_len_after = state.in_memory_queue.read().len();
+    if queue_len_after > 0 {
+        info!(
+            name = "fetcher_loop.in_memory_queue.processing.paused",
+            count = queue_len_after,
+            "paused processing in-memory queue"
+        );
+    } else {
+        info!(
+            name = "fetcher_loop.in_memory_queue.processing.ended",
+            "finished processing in-memory queue"
+        );
+    }
 }
 
 async fn run_health_server(
-    last_attempted_update: Arc<RwLock<Option<DateTime<Utc>>>>,
-    last_successful_update: Arc<RwLock<Option<DateTime<Utc>>>>,
-    last_error: Arc<RwLock<Option<EnqueueError>>>,
+    state: FetcherState,
     shutdown: CancellationToken,
 ) -> Result<(), std::io::Error> {
     info!(name: "axum.initialized", "starting axum health server");
     let app = Router::new()
         .route("/health", get(health_check))
-        .with_state(AxumState {
-            last_successful_update,
-            last_attempted_update,
-            last_error,
-        });
+        .with_state(state);
     let listener = TcpListener::bind("127.0.0.1:3000").await?;
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown.cancelled_owned())
@@ -241,7 +299,7 @@ async fn run_health_server(
     Ok(())
 }
 
-async fn health_check(State(state): State<AxumState>) -> impl IntoResponse {
+async fn health_check(State(state): State<FetcherState>) -> impl IntoResponse {
     let last_attempted_update = *state.last_attempted_update.read();
     let last_successful_update = *state.last_successful_update.read();
     let last_error = if let Some(e) = state.last_error.read().as_ref() {
@@ -249,19 +307,22 @@ async fn health_check(State(state): State<AxumState>) -> impl IntoResponse {
     } else {
         "unknown".to_string()
     };
+    let in_memory_queue_len = state.in_memory_queue.read().len();
 
     if last_attempted_update.is_none() || last_successful_update.is_none() {
         return if let Some(last_attempted_update) = last_attempted_update {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!(
-                    "Datafeed has not been successfully updated. Last attempted update: {last_attempted_update}. Last error: {last_error}"
+                    "Datafeed has not been successfully updated. Last attempted update: {last_attempted_update}. Last error: {last_error}. In-memory queue length: {in_memory_queue_len}"
                 ),
             )
         } else {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "No attempted or successful datafeed updates".to_string(),
+                format!(
+                    "No attempted or successful datafeed updates. In-memory queue length: {in_memory_queue_len}"
+                ),
             )
         };
     }
@@ -273,13 +334,15 @@ async fn health_check(State(state): State<AxumState>) -> impl IntoResponse {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!(
-                "Datafeed not fetched in the last 60 seconds. Last successful update: {last_successful_update}. Last attempted updated: {last_attempted_update}. Last error: {last_error}"
+                "Datafeed not fetched in the last 60 seconds. Last successful update: {last_successful_update}. Last attempted updated: {last_attempted_update}. Last error: {last_error}. In-memory queue length: {in_memory_queue_len}"
             ),
         )
     } else {
         (
             StatusCode::OK,
-            format!("Datafeed last successfully fetched: {last_successful_update}"),
+            format!(
+                "Datafeed last successfully fetched: {last_successful_update}. In-memory queue length: {in_memory_queue_len}"
+            ),
         )
     }
 }
@@ -315,10 +378,10 @@ async fn enqueue_datafeed(
     let mut tx = pool.begin().await?;
 
     sqlx::query(
-        r#"
+        r"
         INSERT INTO datafeed_queue (id, updated_at, payload)
         VALUES ($1, $2, $3)
-        "#,
+        ",
     )
     .bind(id)
     .bind(updated_at)

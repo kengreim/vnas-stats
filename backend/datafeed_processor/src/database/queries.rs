@@ -4,7 +4,7 @@ use crate::database::models::{
 };
 use crate::metrics::DatafeedsMetrics;
 use chrono::{DateTime, Utc};
-use opentelemetry::{KeyValue, global};
+use opentelemetry::KeyValue;
 use shared::vnas::datafeed::Controller;
 use sqlx::{Executor, Postgres};
 use std::num::TryFromIntError;
@@ -621,7 +621,7 @@ where
     E: Executor<'e, Database = Postgres>,
 {
     sqlx::query(
-        r#"
+        r"
         INSERT INTO session_activity_stats (
             observed_at,
             active_controllers,
@@ -630,7 +630,7 @@ where
         )
         VALUES ($1, $2, $3, $4)
         ON CONFLICT (observed_at) DO NOTHING
-        "#,
+        ",
     )
     .bind(observed_at)
     .bind(active_controllers)

@@ -278,7 +278,7 @@ async fn process_pending_datafeeds(
 
             if new_payload {
                 debug!(name: "datafeed.inspected.found_new", updated_at = ?datafeed_root.updated_at, "new datafeed update received");
-                if let Err(e) = process_datafeed_payload(pool, &datafeed_root, &metrics).await {
+                if let Err(e) = process_datafeed_payload(pool, &datafeed_root, metrics).await {
                     tx.rollback().await?;
                     return Err(e.into());
                 }
