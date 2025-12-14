@@ -5,7 +5,6 @@ use axum::{Router, routing::get};
 use shared::{init_tracing_and_oltp, initialize_db, load_config};
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{info, warn};
-use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -69,3 +69,53 @@ pub async fn get_latest_datafeed_updated_at(
     .fetch_optional(pool)
     .await
 }
+
+#[derive(sqlx::FromRow)]
+pub struct ActivitySnapshot {
+    pub observed_at: DateTime<Utc>,
+    pub active_controllers: i32,
+    pub active_callsigns: i32,
+    pub active_positions: i32,
+}
+
+/// Return activity snapshots between start/end, collapsing consecutive duplicates across any of the three counts.
+pub async fn get_activity_snapshots(
+    pool: &Pool<Postgres>,
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+) -> Result<Vec<ActivitySnapshot>, QueryError> {
+    if end <= start {
+        return Err(QueryError::IllegalArgs(
+            "end must be greater than start".to_owned(),
+        ));
+    }
+
+    sqlx::query_as::<_, ActivitySnapshot>(
+        r#"
+        SELECT observed_at, active_controllers, active_callsigns, active_positions
+        FROM (
+            SELECT
+                observed_at,
+                active_controllers,
+                active_callsigns,
+                active_positions,
+                LAG(active_controllers) OVER (ORDER BY observed_at) AS prev_c,
+                LAG(active_callsigns) OVER (ORDER BY observed_at) AS prev_cs,
+                LAG(active_positions) OVER (ORDER BY observed_at) AS prev_p
+            FROM session_activity_stats
+            WHERE observed_at >= $1 AND observed_at <= $2
+            ORDER BY observed_at
+        ) s
+        WHERE prev_c IS NULL
+           OR active_controllers <> prev_c
+           OR active_callsigns <> prev_cs
+           OR active_positions <> prev_p
+        ORDER BY observed_at
+        "#,
+    )
+    .bind(start)
+    .bind(end)
+    .fetch_all(pool)
+    .await
+    .map_err(QueryError::Sql)
+}
