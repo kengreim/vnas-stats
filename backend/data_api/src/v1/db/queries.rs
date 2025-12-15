@@ -22,6 +22,7 @@ pub async fn get_iron_mic_stats(
     start: DateTime<Utc>,
     end: DateTime<Utc>,
     now: DateTime<Utc>,
+    limit: i64,
 ) -> Result<Vec<CallsignDurationStatsRecord>, QueryError> {
     if end <= start {
         return Err(QueryError::IllegalArgs(
@@ -45,11 +46,13 @@ pub async fn get_iron_mic_stats(
           AND (end_time IS NULL OR end_time > $1)
         GROUP BY prefix, suffix
         ORDER BY duration_seconds DESC
+        LIMIT $4
         ",
     )
     .bind(start)
     .bind(end)
     .bind(now)
+    .bind(limit)
     .fetch_all(pool)
     .await
     .map_err(QueryError::Sql)

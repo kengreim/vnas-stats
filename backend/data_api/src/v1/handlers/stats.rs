@@ -50,7 +50,7 @@ pub async fn get_iron_mic_stats(
         );
     };
 
-    let stats = queries::get_iron_mic_stats(&pool, interval.start, interval.end, now).await;
+    let stats = queries::get_iron_mic_stats(&pool, interval.start, interval.end, now, 100).await;
     match stats {
         Err(e) => match e {
             QueryError::Sql(_) => error_into_response(StatusCode::INTERNAL_SERVER_ERROR, ""),

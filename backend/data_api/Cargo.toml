@@ -14,7 +14,7 @@ sqlx = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 thiserror.workspace = true
-tower-http = { workspace = true, features = ["cors"] }
+tower-http = { workspace = true, features = ["cors", "compression-full"] }
 specta.workspace = true
 specta-typescript.workspace = true
 humantime = { workspace = true }

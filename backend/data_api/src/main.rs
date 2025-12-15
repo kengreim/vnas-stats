@@ -3,6 +3,7 @@ mod v1;
 use axum::http::StatusCode;
 use axum::{Router, routing::get};
 use shared::{init_tracing_and_oltp, initialize_db, load_config};
+use tower_http::compression::CompressionLayer;
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{info, warn};
 
@@ -22,6 +23,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
         .route("/health", get(|| async { StatusCode::OK }))
         .nest("/v1", v1::router(pool))
+        .layer(CompressionLayer::new())
         .layer(
             CorsLayer::new()
                 .allow_origin(Any)
