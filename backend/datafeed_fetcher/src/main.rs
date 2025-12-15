@@ -147,6 +147,10 @@ async fn main() -> Result<(), MainError> {
         }
     }
 
+    if let Err(e) = tracer_provider.shutdown() {
+        eprintln!("failed to shut down tracer provider: {e:?}");
+    }
+
     if let Some(err) = first_err {
         Err(err)
     } else {
