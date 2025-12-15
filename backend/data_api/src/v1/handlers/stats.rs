@@ -1,10 +1,14 @@
 use crate::v1::db::queries;
 use crate::v1::db::queries::{QueryError, get_latest_datafeed_updated_at};
-use crate::v1::handlers::param_validators::validate_duration_no_longer_than;
-use crate::v1::handlers::{ClosedSessionInterval, error_into_response};
+use crate::v1::handlers::{error_into_response};
+use crate::v1::handlers::params::{
+    ValidatedInterval,
+    IronMicStatsDuration,
+    ActivityTimeSeriesDuration,
+};
 use crate::v1::traits::Session;
 use axum::Json;
-use axum::extract::{Query, State};
+use axum::extract::{State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use chrono::{DateTime, Utc};
@@ -12,7 +16,6 @@ use serde::Serialize;
 use sqlx::{Pool, Postgres};
 use std::cmp;
 use std::collections::HashMap;
-use std::time::Duration;
 
 #[derive(Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -37,17 +40,9 @@ struct CallsignDurationStats {
 /// On success, returns a [`axum::response::Response`] with [`StatusCode::OK`] and [`IronMicResponse`] as JSON
 pub async fn get_iron_mic_stats(
     State(pool): State<Pool<Postgres>>,
-    Query(params): Query<ClosedSessionInterval>,
+    interval: ValidatedInterval<IronMicStatsDuration>,
 ) -> impl IntoResponse {
     let now = Utc::now();
-    let (start, end) = match validate_duration_no_longer_than(
-        params.start,
-        params.end,
-        Duration::from_hours(24 * 365),
-    ) {
-        Ok(v) => v,
-        Err(resp) => return resp,
-    };
 
     // Get last updated datafeed and return with errors if we can't unwrap
     let last_datafeed_updated_at = get_latest_datafeed_updated_at(&pool).await;
@@ -61,7 +56,7 @@ pub async fn get_iron_mic_stats(
         );
     };
 
-    let callsign_sessions = queries::get_callsign_sessions_between(&pool, start, end).await;
+    let callsign_sessions = queries::get_callsign_sessions_between(&pool, interval.start, interval.end).await;
     match callsign_sessions {
         Err(e) => match e {
             QueryError::Sql(_) => error_into_response(StatusCode::INTERNAL_SERVER_ERROR, ""),
@@ -70,7 +65,7 @@ pub async fn get_iron_mic_stats(
         Ok(callsign_sessions) => {
             let mut map = HashMap::new();
             for session in callsign_sessions {
-                if let Ok(session_duration) = session.duration_seconds_within(start, end, now) {
+                if let Ok(session_duration) = session.duration_seconds_within(interval.start, interval.end, now) {
                     map.entry((session.prefix, session.suffix))
                         .and_modify(|(duration, is_active)| {
                             *duration += session_duration;
@@ -80,7 +75,7 @@ pub async fn get_iron_mic_stats(
                 }
             }
 
-            let uptime_denominator = (cmp::min(end, now) - start).num_seconds();
+            let uptime_denominator = (cmp::min(interval.end, now) - interval.start).num_seconds();
             let mut durations = map
                 .into_iter()
                 .map(
@@ -88,7 +83,7 @@ pub async fn get_iron_mic_stats(
                         prefix,
                         suffix,
                         duration_seconds,
-                        is_active: if now > end { None } else { Some(is_active) },
+                        is_active: if now > interval.end { None } else { Some(is_active) },
                     },
                 )
                 .collect::<Vec<_>>();
@@ -99,8 +94,8 @@ pub async fn get_iron_mic_stats(
                 Json(IronMicResponse {
                     requested_at: now,
                     last_datafeed_updated_at,
-                    start,
-                    end,
+                    start: interval.start,
+                    end: interval.end,
                     actual_elapsed_duration_seconds: uptime_denominator,
                     callsigns: durations,
                 }),
@@ -126,17 +121,8 @@ struct ActivityTimeSeriesResponse {
 /// On success, returns a [`axum::response::Response`] with [`StatusCode::OK`] and [`ActivityTimeSeriesResponse`] as JSON
 pub async fn get_activity_timeseries(
     State(pool): State<Pool<Postgres>>,
-    Query(params): Query<ClosedSessionInterval>,
+    interval: ValidatedInterval<ActivityTimeSeriesDuration>,
 ) -> impl IntoResponse {
-    let (start, end) = match validate_duration_no_longer_than(
-        params.start,
-        params.end,
-        Duration::from_hours(24 * 31),
-    ) {
-        Ok(v) => v,
-        Err(resp) => return resp,
-    };
-
     let last_datafeed_updated_at = match get_latest_datafeed_updated_at(&pool).await {
         Ok(Some(ts)) => ts,
         Ok(None) => {
@@ -145,7 +131,7 @@ pub async fn get_activity_timeseries(
         Err(_) => return error_into_response(StatusCode::INTERNAL_SERVER_ERROR, ""),
     };
 
-    match queries::get_activity_snapshots(&pool, start, end).await {
+    match queries::get_activity_snapshots(&pool, interval.start, interval.end).await {
         Ok(points) => {
             let mut observations = Vec::with_capacity(points.len());
             let mut active_controllers = Vec::with_capacity(points.len());
@@ -164,8 +150,8 @@ pub async fn get_activity_timeseries(
                 Json(ActivityTimeSeriesResponse {
                     requested_at: Utc::now(),
                     last_datafeed_updated_at,
-                    start,
-                    end,
+                    start: interval.start,
+                    end: interval.end,
                     observations,
                     active_controllers,
                     active_callsigns,

@@ -1,19 +1,11 @@
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{Serialize};
 
 pub mod active_sessions;
-mod param_validators;
-mod shared_request_types;
 pub mod stats;
-
-#[derive(Deserialize)]
-pub struct ClosedSessionInterval {
-    pub start: DateTime<Utc>,
-    pub end: DateTime<Utc>,
-}
+pub mod params;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
