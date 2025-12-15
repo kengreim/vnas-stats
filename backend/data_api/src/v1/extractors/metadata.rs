@@ -1,5 +1,5 @@
 use crate::v1::db::queries::get_latest_datafeed_updated_at;
-use crate::v1::utils::error_into_response;
+use crate::v1::utils::ErrorMessage;
 use axum::{
     extract::FromRequestParts,
     http::{StatusCode, request::Parts},
@@ -14,7 +14,7 @@ pub struct DatafeedMetadata {
 }
 
 impl FromRequestParts<Pool<Postgres>> for DatafeedMetadata {
-    type Rejection = Response;
+    type Rejection = ErrorMessage;
 
     async fn from_request_parts(
         _parts: &mut Parts,
@@ -23,14 +23,14 @@ impl FromRequestParts<Pool<Postgres>> for DatafeedMetadata {
         let now = Utc::now();
 
         let last_updated = get_latest_datafeed_updated_at(state).await.map_err(|_| {
-            error_into_response(StatusCode::INTERNAL_SERVER_ERROR, "database error")
+            ErrorMessage::from((StatusCode::INTERNAL_SERVER_ERROR, "database error"))
         })?;
 
         let last_datafeed_updated_at = last_updated.ok_or_else(|| {
-            error_into_response(
+            ErrorMessage::from((
                 StatusCode::SERVICE_UNAVAILABLE,
                 "no datafeeds available yet",
-            )
+            ))
         })?;
 
         Ok(Self {

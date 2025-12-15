@@ -1,4 +1,4 @@
-use crate::v1::utils::error_into_response;
+use crate::v1::utils::ErrorMessage;
 use axum::{
     extract::{FromRequestParts, Query},
     http::{StatusCode, request::Parts},
@@ -50,28 +50,28 @@ where
     S: Send + Sync,
     T: WithMaxDuration + Send + Sync,
 {
-    type Rejection = Response;
+    type Rejection = ErrorMessage;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let Query(params) = Query::<RawInterval>::from_request_parts(parts, state)
             .await
-            .map_err(|e| error_into_response(StatusCode::BAD_REQUEST, e.to_string()))?;
+            .map_err(|e| ErrorMessage::from((StatusCode::BAD_REQUEST, e.to_string())))?;
 
         let max_duration = T::MAX_DURATION;
         let now = Utc::now();
 
         if params.end <= params.start {
-            return Err(error_into_response(
+            return Err(ErrorMessage::from((
                 StatusCode::BAD_REQUEST,
                 "end must be greater than start",
-            ));
+            )));
         }
 
         if params.start > now {
-            return Err(error_into_response(
+            return Err(ErrorMessage::from((
                 StatusCode::BAD_REQUEST,
                 "start must be in the past",
-            ));
+            )));
         }
 
         if (params.end - params.start).num_seconds() > max_duration.as_secs() as i64 {
@@ -80,7 +80,7 @@ where
                 max_duration.as_secs(),
                 humantime::format_duration(max_duration)
             );
-            return Err(error_into_response(StatusCode::BAD_REQUEST, duration_str));
+            return Err(ErrorMessage::from((StatusCode::BAD_REQUEST, duration_str)));
         }
 
         Ok(Self {

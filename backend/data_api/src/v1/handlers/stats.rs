@@ -2,7 +2,7 @@ use crate::v1::db::queries;
 use crate::v1::db::queries::QueryError;
 use crate::v1::extractors::metadata::DatafeedMetadata;
 use crate::v1::extractors::params::{MaxDurationInterval, OneMonth, OneYear};
-use crate::v1::utils::error_into_response;
+use crate::v1::utils::ErrorMessage;
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -37,14 +37,14 @@ pub async fn get_iron_mic_stats(
     State(pool): State<Pool<Postgres>>,
     meta: DatafeedMetadata,
     interval: MaxDurationInterval<OneYear>,
-) -> impl IntoResponse {
+) -> Result<impl IntoResponse, ErrorMessage> {
     let stats =
         queries::get_iron_mic_stats(&pool, interval.start, interval.end, meta.requested_at, 50)
             .await;
     match stats {
         Err(e) => match e {
-            QueryError::Sql(_) => error_into_response(StatusCode::INTERNAL_SERVER_ERROR, ""),
-            QueryError::IllegalArgs(msg) => error_into_response(StatusCode::BAD_REQUEST, msg),
+            QueryError::Sql(_) => Err(ErrorMessage::from((StatusCode::INTERNAL_SERVER_ERROR, ""))),
+            QueryError::IllegalArgs(msg) => Err(ErrorMessage::from((StatusCode::BAD_REQUEST, msg))),
         },
         Ok(stats) => {
             let uptime_denominator =
@@ -63,7 +63,7 @@ pub async fn get_iron_mic_stats(
                 })
                 .collect::<Vec<_>>();
 
-            (
+            Ok((
                 StatusCode::OK,
                 Json(IronMicResponse {
                     requested_at: meta.requested_at,
@@ -73,8 +73,7 @@ pub async fn get_iron_mic_stats(
                     actual_elapsed_duration_seconds: uptime_denominator,
                     callsigns: durations,
                 }),
-            )
-                .into_response()
+            ))
         }
     }
 }
@@ -97,7 +96,7 @@ pub async fn get_activity_timeseries(
     State(pool): State<Pool<Postgres>>,
     meta: DatafeedMetadata,
     interval: MaxDurationInterval<OneMonth>,
-) -> impl IntoResponse {
+) -> Result<impl IntoResponse, ErrorMessage> {
     match queries::get_activity_snapshots(&pool, interval.start, interval.end).await {
         Ok(points) => {
             let mut observations = Vec::with_capacity(points.len());
@@ -112,7 +111,7 @@ pub async fn get_activity_timeseries(
                 active_positions.push(p.active_positions);
             }
 
-            (
+            Ok((
                 StatusCode::OK,
                 Json(ActivityTimeSeriesResponse {
                     requested_at: meta.requested_at,
@@ -124,10 +123,11 @@ pub async fn get_activity_timeseries(
                     active_callsigns,
                     active_positions,
                 }),
-            )
-                .into_response()
+            ))
         }
-        Err(QueryError::IllegalArgs(msg)) => error_into_response(StatusCode::BAD_REQUEST, msg),
-        Err(QueryError::Sql(_)) => error_into_response(StatusCode::INTERNAL_SERVER_ERROR, ""),
+        Err(QueryError::IllegalArgs(msg)) => {
+            Err(ErrorMessage::from((StatusCode::BAD_REQUEST, msg)))
+        }
+        Err(QueryError::Sql(_)) => Err(ErrorMessage::from((StatusCode::INTERNAL_SERVER_ERROR, ""))),
     }
 }
