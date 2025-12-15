@@ -1,6 +1,5 @@
 use chrono::{DateTime, Utc};
 use sqlx::{Pool, Postgres};
-use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
 pub enum QueryError {
@@ -11,47 +10,46 @@ pub enum QueryError {
 }
 
 #[derive(sqlx::FromRow)]
-pub struct CallsignSessionRecord {
-    pub id: Uuid,
+pub struct CallsignDurationStatsRecord {
     pub prefix: String,
     pub suffix: String,
-    pub start_time: DateTime<Utc>,
-    pub end_time: Option<DateTime<Utc>>,
+    pub duration_seconds: i64,
+    pub is_active: bool,
 }
 
-impl crate::v1::traits::Session for CallsignSessionRecord {
-    fn start_time(&self) -> DateTime<Utc> {
-        self.start_time
-    }
-
-    fn end_time(&self) -> Option<DateTime<Utc>> {
-        self.end_time
-    }
-}
-
-/// Fetch callsign sessions that overlap the provided time window.
-pub async fn get_callsign_sessions_between(
+pub async fn get_iron_mic_stats(
     pool: &Pool<Postgres>,
     start: DateTime<Utc>,
     end: DateTime<Utc>,
-) -> Result<Vec<CallsignSessionRecord>, QueryError> {
+    now: DateTime<Utc>,
+) -> Result<Vec<CallsignDurationStatsRecord>, QueryError> {
     if end <= start {
         return Err(QueryError::IllegalArgs(
             "end must be greater than start".to_owned(),
         ));
     }
 
-    sqlx::query_as::<_, CallsignSessionRecord>(
+    sqlx::query_as::<_, CallsignDurationStatsRecord>(
         r"
-        SELECT id, prefix, suffix, start_time, end_time
+        SELECT
+            prefix,
+            suffix,
+            SUM(
+                EXTRACT(EPOCH FROM (
+                    LEAST(COALESCE(end_time, $3), $2) - GREATEST(start_time, $1)
+                ))
+            )::BIGINT AS duration_seconds,
+            BOOL_OR(end_time IS NULL) AS is_active
         FROM callsign_sessions
         WHERE start_time < $2
           AND (end_time IS NULL OR end_time > $1)
-        ORDER BY start_time
+        GROUP BY prefix, suffix
+        ORDER BY duration_seconds DESC
         ",
     )
     .bind(start)
     .bind(end)
+    .bind(now)
     .fetch_all(pool)
     .await
     .map_err(QueryError::Sql)

@@ -1,7 +1,6 @@
 use crate::v1::db::queries;
 use crate::v1::db::queries::{QueryError, get_latest_datafeed_updated_at};
 use crate::v1::extractors::params::{MaxDurationInterval, OneMonth, OneYear};
-use crate::v1::traits::Session;
 use crate::v1::utils::error_into_response;
 use axum::Json;
 use axum::extract::State;
@@ -11,7 +10,6 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sqlx::{Pool, Postgres};
 use std::cmp;
-use std::collections::HashMap;
 
 #[derive(Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -52,45 +50,27 @@ pub async fn get_iron_mic_stats(
         );
     };
 
-    let callsign_sessions =
-        queries::get_callsign_sessions_between(&pool, interval.start, interval.end).await;
-    match callsign_sessions {
+    let stats = queries::get_iron_mic_stats(&pool, interval.start, interval.end, now).await;
+    match stats {
         Err(e) => match e {
             QueryError::Sql(_) => error_into_response(StatusCode::INTERNAL_SERVER_ERROR, ""),
             QueryError::IllegalArgs(msg) => error_into_response(StatusCode::BAD_REQUEST, msg),
         },
-        Ok(callsign_sessions) => {
-            let mut map = HashMap::new();
-            for session in callsign_sessions {
-                if let Ok(session_duration) =
-                    session.duration_seconds_within(interval.start, interval.end, now)
-                {
-                    map.entry((session.prefix, session.suffix))
-                        .and_modify(|(duration, is_active)| {
-                            *duration += session_duration;
-                            *is_active = *is_active || session.end_time.is_none();
-                        })
-                        .or_insert((session_duration, session.end_time.is_none()));
-                }
-            }
-
+        Ok(stats) => {
             let uptime_denominator = (cmp::min(interval.end, now) - interval.start).num_seconds();
-            let mut durations = map
+            let durations = stats
                 .into_iter()
-                .map(
-                    |((prefix, suffix), (duration_seconds, is_active))| CallsignDurationStats {
-                        prefix,
-                        suffix,
-                        duration_seconds,
-                        is_active: if now > interval.end {
-                            None
-                        } else {
-                            Some(is_active)
-                        },
+                .map(|s| CallsignDurationStats {
+                    prefix: s.prefix,
+                    suffix: s.suffix,
+                    duration_seconds: s.duration_seconds,
+                    is_active: if now > interval.end {
+                        None
+                    } else {
+                        Some(s.is_active)
                     },
-                )
+                })
                 .collect::<Vec<_>>();
-            durations.sort_by_key(|k| i64::MAX - k.duration_seconds);
 
             (
                 StatusCode::OK,
