@@ -27,12 +27,11 @@ pub struct AxumState {
 
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
-    let (subscriber, tracer_provider) = init_tracing_and_oltp("artcc_updater")?;
-    tracing::subscriber::set_global_default(subscriber).map_err(InitializationError::from)?;
+    let tracer_provider = init_tracing_and_oltp("artcc_updater")?;
 
     let config = load_config().map_err(InitializationError::from)?;
-    info!(config = ?config, "config loaded");
-    let db_pool = initialize_db(&config.postgres).await?;
+    info!(name: "config.loaded", config = ?config, "config loaded");
+    let db_pool = initialize_db(&config.postgres, true).await?;
     let client = Client::new();
 
     let app = Router::new()
@@ -64,11 +63,11 @@ async fn update_data(State(state): State<AxumState>) -> impl IntoResponse {
     let res = fetch_and_process(&state.client, &state.db_pool).await;
     match res {
         Ok(()) => {
-            info!("ARTCC data sync was successful");
+            info!(name: "artcc.updated", "ARTCC data sync was successful");
             (StatusCode::OK, "ARTCC data sync was successful".to_string())
         }
         Err(ref e) => {
-            error!(error = ?e, "failed to sync ARTCC data");
+            error!(name: "artcc.updated", error = ?e, "failed to sync ARTCC data");
             (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
         }
     }
@@ -83,7 +82,7 @@ async fn fetch_and_process(client: &Client, pool: &Pool<Postgres>) -> Result<(),
 
 #[instrument(skip(client))]
 async fn fetch_artccs(client: &Client) -> Result<Vec<MinimalArtccRoot>, AppError> {
-    debug!("fetching all ARTCCs data from vNAS API");
+    debug!(name: "vnas.data.fetch.started" ,"fetching all ARTCCs data from vNAS API");
     let resp = client
         .get(shared::vnas::api::ALL_ARTCCS_ENDPOINT)
         .send()
@@ -91,7 +90,7 @@ async fn fetch_artccs(client: &Client) -> Result<Vec<MinimalArtccRoot>, AppError
         .error_for_status()?
         .json::<Vec<MinimalArtccRoot>>()
         .await?;
-    debug!(len = resp.len(), "fetched ARTCCs from vNAS API");
+    debug!(name: "vnas.data.fetch.completed", len = resp.len(), "fetched ARTCCs from vNAS API");
 
     Ok(resp)
 }
@@ -140,9 +139,9 @@ async fn process_artccs(
         .map(|a| a.id.to_owned())
         .collect::<Vec<_>>();
     if updated_artcc_ids.is_empty() {
-        info!("found no ARTCCs to update");
+        info!(name: "vnas.data.processing.no_updates", "found no ARTCCs to update");
     } else {
-        info!(ids = ?updated_artcc_ids, "found ARTCCs to update");
+        info!(name: "vnas.data.processing.updates_found", ids = ?updated_artcc_ids, "found ARTCCs to update");
     }
 
     for artcc in artccs_to_update {
@@ -210,7 +209,7 @@ async fn process_artccs(
         .bind(&processed_artcc_ids_refs)
         .execute(&mut *tx)
         .await?;
-        info!(n = n.rows_affected(), "marked facilities inactive");
+        info!(name: "vnas.data.processing.inactive.facilities.flagged", n = n.rows_affected(), "marked facilities inactive");
     }
 
     for position in &positions {
@@ -274,7 +273,7 @@ async fn process_artccs(
         .bind(&processed_artcc_ids_refs)
         .execute(&mut *tx)
         .await?;
-        info!(n = n.rows_affected(), "marked positions inactive")
+        info!(name: "vnas.data.processing.inactive.positions.flagged", n = n.rows_affected(), "marked positions inactive")
     }
 
     tx.commit().await?;

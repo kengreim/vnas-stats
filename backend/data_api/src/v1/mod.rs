@@ -5,6 +5,7 @@ mod traits;
 mod utils;
 
 use crate::v1::handlers::stats::get_iron_mic_stats;
+use crate::v1::handlers::stats::get_activity_timeseries;
 use axum::{Router, routing::get};
 use sqlx::{Pool, Postgres};
 
@@ -19,5 +20,6 @@ pub fn router(pool: Pool<Postgres>) -> Router {
 
     Router::new()
         .route("/callsigns/top", get(get_iron_mic_stats))
+        .route("/activity/timeseries", get(get_activity_timeseries))
         .with_state(pool)
 }

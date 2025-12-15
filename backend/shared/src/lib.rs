@@ -4,10 +4,14 @@ use crate::error::InitializationError::MissingEnvVar;
 use crate::error::{ConfigError, InitializationError};
 use figment::Figment;
 use figment::providers::{Env, Format, Toml};
+use opentelemetry::global;
 use opentelemetry::trace::TracerProvider;
-use opentelemetry_otlp::WithTonicConfig;
+use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
+use opentelemetry_otlp::{LogExporterBuilder, MetricExporterBuilder, WithTonicConfig};
 use opentelemetry_resource_detectors::ProcessResourceDetector;
 use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::logs::SdkLoggerProvider;
+use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::resource::{
     EnvResourceDetector, ResourceDetector, SdkProvidedResourceDetector,
 };
@@ -18,10 +22,11 @@ use sqlx::{Pool, Postgres};
 use std::env;
 use tokio::signal;
 use tokio_util::sync::CancellationToken;
-use tracing::{Subscriber, info};
+use tracing::{info, instrument};
 use tracing_subscriber::fmt::Layer;
 use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::{EnvFilter, Registry};
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{EnvFilter, registry};
 
 pub const DATAFEED_QUEUE_NAME: &str = "vnas_stats";
 pub const ENV_VAR_PREFIX: &str = "VNAS_STATS__";
@@ -75,16 +80,22 @@ pub mod error {
     }
 }
 
+#[instrument]
 pub async fn initialize_db(
     pg_config: &PostgresConfig,
+    migrate: bool,
 ) -> Result<Pool<Postgres>, InitializationError> {
     let pool = PgPoolOptions::new()
         .max_connections(5)
         .connect(&pg_config.connection_string)
         .await?;
 
+    info!(name: "db.connected", "db pool created and connected");
+
     // Run any new migrations
-    sqlx::migrate!("./migrations").run(&pool).await?;
+    if migrate {
+        sqlx::migrate!("./migrations").run(&pool).await?;
+    }
 
     Ok(pool)
 }
@@ -102,8 +113,8 @@ pub async fn shutdown_listener(token: Option<CancellationToken>) {
     let terminate = std::future::pending::<()>();
 
     tokio::select! {
-        _ = ctrl_c => info!("received Ctrl+C signal, shutting down"),
-        _ = terminate => info!("received SIGTERM signal, shutting down"),
+        _ = ctrl_c => info!(name: "signal.ctrlc.received", "received Ctrl+C signal, shutting down"),
+        _ = terminate => info!(name: "signal.sigterm.received", "received SIGTERM signal, shutting down"),
     }
 
     if let Some(token) = token {
@@ -113,13 +124,7 @@ pub async fn shutdown_listener(token: Option<CancellationToken>) {
 
 pub fn init_tracing_and_oltp(
     name: impl ToString,
-) -> Result<
-    (
-        Box<dyn Subscriber + Send + Sync + 'static>,
-        SdkTracerProvider,
-    ),
-    InitializationError,
-> {
+) -> Result<SdkTracerProvider, InitializationError> {
     // OpenTelemetry env vars that should be set at a minimum
     let env_vars = vec![
         "OTEL_SERVICE_NAME",
@@ -130,11 +135,12 @@ pub fn init_tracing_and_oltp(
         let _ = env::var(var).map_err(|_| MissingEnvVar(var.to_string()));
     }
 
-    let exporter = opentelemetry_otlp::SpanExporterBuilder::default()
+    // tracing_opentelemetry setup for spans
+    let span_exporter = opentelemetry_otlp::SpanExporterBuilder::default()
         .with_tonic()
         .with_tls_config(tonic::transport::ClientTlsConfig::new().with_native_roots())
         .build()
-        .expect("Failed to create OTLP exporter");
+        .expect("Failed to create OTLP span exporter");
 
     let detectors: Vec<Box<dyn ResourceDetector>> = vec![
         Box::new(SdkProvidedResourceDetector),
@@ -145,12 +151,39 @@ pub fn init_tracing_and_oltp(
 
     let tracer_provider = SdkTracerProvider::builder()
         .with_resource(resource)
-        .with_batch_exporter(exporter)
+        .with_batch_exporter(span_exporter)
+        .build();
+    let tracer = tracer_provider.tracer(name.to_string());
+    global::set_tracer_provider(tracer_provider.clone());
+
+    let telemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
+
+    // opentelemetry_appender_tracing setup for logs
+    let log_exporter = LogExporterBuilder::default()
+        .with_tonic()
+        .with_tls_config(tonic::transport::ClientTlsConfig::new().with_native_roots())
+        .build()
+        .expect("Failed to create OTLP log exporter");
+
+    let logger_provider = SdkLoggerProvider::builder()
+        .with_batch_exporter(log_exporter)
         .build();
 
-    let telemetry_layer =
-        tracing_opentelemetry::layer().with_tracer(tracer_provider.tracer(name.to_string()));
+    let otel_log_layer = OpenTelemetryTracingBridge::new(&logger_provider);
 
+    // Setup for OTel Metrics
+    let meter_exporter = MetricExporterBuilder::new()
+        .with_tonic()
+        .with_tls_config(tonic::transport::ClientTlsConfig::new().with_native_roots())
+        .build()
+        .expect("Failed to create OTLP metric exporter");
+
+    let meter_provider = SdkMeterProvider::builder()
+        .with_periodic_exporter(meter_exporter)
+        .build();
+    global::set_meter_provider(meter_provider.clone());
+
+    // Standard console format and env filter layers
     let fmt_layer = Layer::new()
         .compact()
         .with_file(true)
@@ -159,10 +192,12 @@ pub fn init_tracing_and_oltp(
     let env_filter_layer =
         EnvFilter::try_from_default_env().expect("failed to get RUST_LOG from env");
 
-    let subscriber = Registry::default()
+    registry()
         .with(env_filter_layer)
         .with(fmt_layer)
-        .with(telemetry_layer);
+        .with(otel_log_layer)
+        .with(telemetry_layer)
+        .init();
 
-    Ok((Box::new(subscriber), tracer_provider))
+    Ok(tracer_provider)
 }

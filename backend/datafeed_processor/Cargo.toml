@@ -5,7 +5,6 @@ edition = "2024"
 
 [dependencies]
 tracing.workspace = true
-tracing-subscriber.workspace = true
 tokio.workspace = true
 shared = { path = "../shared" }
 sqlx.workspace = true
@@ -18,3 +17,4 @@ zstd.workspace = true
 axum.workspace = true
 parking_lot.workspace = true
 tokio-util.workspace = true
+opentelemetry.workspace = true

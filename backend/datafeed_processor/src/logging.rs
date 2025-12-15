@@ -57,9 +57,9 @@ pub async fn debug_log_sessions_changes(
     // Log all the opened controller, callsign and position sessions
 
     if created_controllers.is_empty() {
-        debug!("no opened controller sessions");
+        debug!(name: "datafeed.processed.debug.controllers.opened", "no opened controller sessions");
     } else {
-        debug!(controllers = ?created_controllers, "opened controller sessions");
+        debug!(name: "datafeed.processed.debug.controllers.opened", controllers = ?created_controllers, "opened controller sessions");
     }
     log_callsign_sessions(
         &mut tx,
@@ -78,9 +78,9 @@ pub async fn debug_log_sessions_changes(
 
     // Log all the closed controller, sallsign and position sessions
     if closed_controllers.is_empty() {
-        debug!("no closed controller sessions");
+        debug!(name: "datafeed.processed.debug.controllers.closed", "no closed controller sessions");
     } else {
-        debug!(controllers = ?closed_controllers, "closed controller sessions");
+        debug!(name: "datafeed.processed.debug.controllers.closed", controllers = ?closed_controllers, "closed controller sessions");
     }
     log_callsign_sessions(
         &mut tx,

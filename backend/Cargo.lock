@@ -44,6 +44,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "chrono",
+ "opentelemetry",
  "reqwest",
  "shared",
  "sqlx",
@@ -366,7 +367,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
- "tracing-subscriber",
  "uuid",
 ]
 
@@ -376,6 +376,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "chrono",
+ "opentelemetry",
  "parking_lot",
  "serde",
  "serde_json",
@@ -385,7 +386,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
- "tracing-subscriber",
  "uuid",
  "zstd",
 ]
@@ -1363,6 +1363,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "opentelemetry-appender-tracing"
+version = "0.31.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef6a1ac5ca3accf562b8c306fa8483c85f4390f768185ab775f242f7fe8fdcc2"
+dependencies = [
+ "opentelemetry",
+ "tracing",
+ "tracing-core",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "opentelemetry-http"
 version = "0.31.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2030,6 +2042,7 @@ dependencies = [
  "chrono",
  "figment",
  "opentelemetry",
+ "opentelemetry-appender-tracing",
  "opentelemetry-otlp",
  "opentelemetry-resource-detectors",
  "opentelemetry_sdk",

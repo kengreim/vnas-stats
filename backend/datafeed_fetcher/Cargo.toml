@@ -5,7 +5,6 @@ edition = "2024"
 
 [dependencies]
 tracing.workspace = true
-tracing-subscriber.workspace = true
 tokio.workspace = true
 shared = { path = "../shared" }
 reqwest.workspace = true

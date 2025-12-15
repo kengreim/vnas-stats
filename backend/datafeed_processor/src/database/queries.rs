@@ -2,11 +2,14 @@ use crate::database::models::{
     ActiveSessionKey, CallsignSession, PositionSession, PositionSessionDetails, QueuedDatafeed,
     UserRating,
 };
+use crate::metrics::DatafeedsMetrics;
 use chrono::{DateTime, Utc};
+use opentelemetry::KeyValue;
 use shared::vnas::datafeed::Controller;
 use sqlx::{Executor, Postgres};
 use std::num::TryFromIntError;
 use thiserror::Error;
+use tracing::instrument;
 use uuid::Uuid;
 
 #[derive(Debug, Error)]
@@ -30,6 +33,7 @@ pub enum QueryError {
 //         .map_err(QueryError::from)
 // }
 
+#[instrument(level = "debug", skip(executor))]
 pub async fn fetch_datafeed_batch<'e, E>(
     executor: E,
     limit: i64,
@@ -54,9 +58,11 @@ where
 
 /// Returns a tuple `(Uuid, bool)` where the Uuid is the payload primary key in the
 /// database and the bool indicates whether a new row was inserted
+#[instrument(level = "debug", skip(executor, message, metrics))]
 pub async fn upsert_datafeed_payload<'e, E>(
     executor: &mut E,
     message: &QueuedDatafeed,
+    metrics: &DatafeedsMetrics,
 ) -> Result<(Uuid, bool), QueryError>
 where
     for<'c> &'c mut E: Executor<'c, Database = Postgres>,
@@ -64,6 +70,7 @@ where
     let payload_bytes = serde_json::to_vec(&message.payload)?;
     let original_size = i32::try_from(payload_bytes.len()).map_err(QueryError::PayloadTooLarge)?;
     let payload_compressed = zstd::encode_all(payload_bytes.as_slice(), 3)?;
+    let payload_compressed_size = payload_compressed.len();
 
     if let Some(id) = sqlx::query_scalar::<_, Uuid>(
         r"
@@ -97,9 +104,20 @@ where
             .fetch_one(&mut *executor)
             .await?;
 
+    // Add metrics to track size of datafeeds
+    metrics.bytes_uncompressed.add(
+        original_size as u64,
+        &[KeyValue::new("updated_at", message.updated_at.to_string())],
+    );
+    metrics.bytes_compressed.add(
+        payload_compressed_size as u64,
+        &[KeyValue::new("updated_at", message.updated_at.to_string())],
+    );
+
     Ok((existing_id, false))
 }
 
+#[instrument(level = "debug", skip(executor))]
 pub async fn insert_datafeed_message<'e, E>(
     executor: &mut E,
     queue_id: Uuid,
@@ -127,6 +145,7 @@ where
     .map_err(QueryError::from)
 }
 
+#[instrument(level = "debug", skip(executor))]
 pub async fn delete_queued_datafeed<'e, E>(executor: &mut E, id: Uuid) -> Result<(), QueryError>
 where
     for<'c> &'c mut E: Executor<'c, Database = Postgres>,
@@ -139,6 +158,7 @@ where
         .map_err(QueryError::from)
 }
 
+#[instrument(level = "debug", skip(executor))]
 pub async fn get_active_controller_session_keys<'e, E>(
     executor: E,
 ) -> Result<Vec<ActiveSessionKey>, QueryError>
@@ -157,6 +177,7 @@ where
     .map_err(QueryError::from)
 }
 
+#[instrument(skip(executor))]
 pub async fn insert_controller_session<'e, E>(
     executor: E,
     controller: &Controller,
@@ -217,6 +238,7 @@ where
     Ok(id)
 }
 
+#[instrument(level = "debug", skip(executor))]
 pub async fn update_active_controller_session<'e, E>(
     executor: E,
     session_id: Uuid,
@@ -257,6 +279,7 @@ where
     .map_err(QueryError::from)
 }
 
+#[instrument(level = "debug", skip(executor))]
 pub async fn complete_controller_sessions<'e, E>(
     executor: E,
     ids: &[Uuid],
@@ -285,6 +308,7 @@ where
     Ok(result.rows_affected())
 }
 
+#[instrument(level = "debug", skip(executor))]
 pub async fn get_active_callsign_sessions<'e, E>(
     executor: E,
 ) -> Result<Vec<CallsignSession>, QueryError>
@@ -303,6 +327,7 @@ where
     .map_err(QueryError::from)
 }
 
+#[instrument(level = "debug", skip(executor))]
 pub async fn get_active_position_sessions<'e, E>(
     executor: E,
 ) -> Result<Vec<PositionSession>, QueryError>
@@ -321,6 +346,7 @@ where
     .map_err(QueryError::from)
 }
 
+#[instrument(level = "debug", skip(executor))]
 pub async fn fetch_callsign_session_details<'e, E>(
     executor: E,
     ids: &[Uuid],
@@ -345,6 +371,7 @@ where
     .map_err(QueryError::from)
 }
 
+#[instrument(level = "debug", skip(executor))]
 pub async fn fetch_position_session_details<'e, E>(
     executor: E,
     ids: &[Uuid],
@@ -370,6 +397,7 @@ where
     .map_err(QueryError::from)
 }
 
+#[instrument(level = "debug", skip(executor))]
 pub async fn get_or_create_callsign_session<E>(
     executor: &mut E,
     prefix: &str,
@@ -424,6 +452,7 @@ where
     Ok(id)
 }
 
+#[instrument(level = "debug", skip(executor))]
 pub async fn update_callsign_session_last_seen<'e, E>(
     executor: &mut E,
     id: Uuid,
@@ -447,6 +476,7 @@ where
     .map_err(QueryError::from)
 }
 
+#[instrument(level = "debug", skip(executor))]
 pub async fn complete_callsign_sessions<'e, E>(
     executor: E,
     ids: &[Uuid],
@@ -475,6 +505,7 @@ where
     Ok(result.rows_affected())
 }
 
+#[instrument(level = "debug", skip(executor))]
 pub async fn get_or_create_position_session<E>(
     executor: &mut E,
     position_id: &str,
@@ -525,6 +556,7 @@ where
     Ok(id)
 }
 
+#[instrument(level = "debug", skip(executor))]
 pub async fn update_position_session_last_seen<'e, E>(
     executor: &mut E,
     id: Uuid,
@@ -548,6 +580,7 @@ where
     .map_err(QueryError::from)
 }
 
+#[instrument(level = "debug", skip(executor))]
 pub async fn complete_position_sessions<'e, E>(
     executor: E,
     ids: &[Uuid],
@@ -574,4 +607,37 @@ where
     .map_err(QueryError::from)?;
 
     Ok(result.rows_affected())
+}
+
+#[instrument(level = "debug", skip(executor))]
+pub async fn insert_session_activity_stats<'e, E>(
+    executor: E,
+    observed_at: DateTime<Utc>,
+    active_controllers: i64,
+    active_callsigns: i64,
+    active_positions: i64,
+) -> Result<(), QueryError>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    sqlx::query(
+        r"
+        INSERT INTO session_activity_stats (
+            observed_at,
+            active_controllers,
+            active_callsigns,
+            active_positions
+        )
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (observed_at) DO NOTHING
+        ",
+    )
+    .bind(observed_at)
+    .bind(active_controllers)
+    .bind(active_callsigns)
+    .bind(active_positions)
+    .execute(executor)
+    .await
+    .map(|_| ())
+    .map_err(QueryError::from)
 }
