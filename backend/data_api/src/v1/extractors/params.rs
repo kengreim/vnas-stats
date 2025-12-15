@@ -22,27 +22,30 @@ pub trait WithMaxDuration {
     const MAX_DURATION: Duration;
 }
 
-/// Marker for Iron Mic Stats duration (365 days).
-pub struct IronMicStatsDuration;
-impl WithMaxDuration for IronMicStatsDuration {
+/// Marker for 365 days maximum duration.
+pub struct OneYear;
+impl WithMaxDuration for OneYear {
     const MAX_DURATION: Duration = Duration::from_secs(60 * 60 * 24 * 365);
 }
 
-/// Marker for Activity Time Series duration (31 days).
-pub struct ActivityTimeSeriesDuration;
-impl WithMaxDuration for ActivityTimeSeriesDuration {
+/// Marker for 1 month (31 days)  maximum duration.
+pub struct OneMonth;
+impl WithMaxDuration for OneMonth {
     const MAX_DURATION: Duration = Duration::from_secs(60 * 60 * 24 * 31);
 }
 
-/// Generic extractor for validated closed session intervals.
+/// Generic extractor for validated intervals that ensures:
+/// 1) `start` is in the past
+/// 2) `start` is prior to `end`
+/// 3) the difference between `start` and `end` is not greater than the maximum allowed duration provided by the marker that impls [`WithMaxDuration`].
 #[derive(Debug, Clone)]
-pub struct ValidatedInterval<T: WithMaxDuration> {
+pub struct MaxDurationInterval<T: WithMaxDuration> {
     pub start: DateTime<Utc>,
     pub end: DateTime<Utc>,
     _marker: PhantomData<T>,
 }
 
-impl<S, T> FromRequestParts<S> for ValidatedInterval<T>
+impl<S, T> FromRequestParts<S> for MaxDurationInterval<T>
 where
     S: Send + Sync,
     T: WithMaxDuration + Send + Sync,

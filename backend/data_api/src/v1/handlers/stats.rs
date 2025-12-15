@@ -1,11 +1,7 @@
 use crate::v1::db::queries;
 use crate::v1::db::queries::{QueryError, get_latest_datafeed_updated_at};
 use crate::v1::handlers::{error_into_response};
-use crate::v1::handlers::params::{
-    ValidatedInterval,
-    IronMicStatsDuration,
-    ActivityTimeSeriesDuration,
-};
+use crate::v1::extractors::params::{MaxDurationInterval, OneYear, OneMonth};
 use crate::v1::traits::Session;
 use axum::Json;
 use axum::extract::{State};
@@ -40,7 +36,7 @@ struct CallsignDurationStats {
 /// On success, returns a [`axum::response::Response`] with [`StatusCode::OK`] and [`IronMicResponse`] as JSON
 pub async fn get_iron_mic_stats(
     State(pool): State<Pool<Postgres>>,
-    interval: ValidatedInterval<IronMicStatsDuration>,
+    interval: MaxDurationInterval<OneYear>,
 ) -> impl IntoResponse {
     let now = Utc::now();
 
@@ -121,7 +117,7 @@ struct ActivityTimeSeriesResponse {
 /// On success, returns a [`axum::response::Response`] with [`StatusCode::OK`] and [`ActivityTimeSeriesResponse`] as JSON
 pub async fn get_activity_timeseries(
     State(pool): State<Pool<Postgres>>,
-    interval: ValidatedInterval<ActivityTimeSeriesDuration>,
+    interval: MaxDurationInterval<OneMonth>,
 ) -> impl IntoResponse {
     let last_datafeed_updated_at = match get_latest_datafeed_updated_at(&pool).await {
         Ok(Some(ts)) => ts,

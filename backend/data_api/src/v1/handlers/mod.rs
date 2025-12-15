@@ -5,7 +5,6 @@ use serde::{Serialize};
 
 pub mod active_sessions;
 pub mod stats;
-pub mod params;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

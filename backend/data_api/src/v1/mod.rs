@@ -3,6 +3,7 @@ mod db;
 mod handlers;
 mod traits;
 mod utils;
+mod extractors;
 
 use crate::v1::handlers::stats::get_iron_mic_stats;
 use crate::v1::handlers::stats::get_activity_timeseries;
