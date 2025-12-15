@@ -1,5 +1,6 @@
 use crate::v1::db::queries;
-use crate::v1::db::queries::{QueryError, get_latest_datafeed_updated_at};
+use crate::v1::db::queries::QueryError;
+use crate::v1::extractors::metadata::DatafeedMetadata;
 use crate::v1::extractors::params::{MaxDurationInterval, OneMonth, OneYear};
 use crate::v1::utils::error_into_response;
 use axum::Json;
@@ -34,37 +35,27 @@ struct CallsignDurationStats {
 /// On success, returns a [`axum::response::Response`] with [`StatusCode::OK`] and [`IronMicResponse`] as JSON
 pub async fn get_iron_mic_stats(
     State(pool): State<Pool<Postgres>>,
+    meta: DatafeedMetadata,
     interval: MaxDurationInterval<OneYear>,
 ) -> impl IntoResponse {
-    let now = Utc::now();
-
-    // Get last updated datafeed and return with errors if we can't unwrap
-    let last_datafeed_updated_at = get_latest_datafeed_updated_at(&pool).await;
-    let Ok(last_datafeed_updated_at) = last_datafeed_updated_at else {
-        return error_into_response(StatusCode::INTERNAL_SERVER_ERROR, "");
-    };
-    let Some(last_datafeed_updated_at) = last_datafeed_updated_at else {
-        return error_into_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "no datafeeds have been fetched yet",
-        );
-    };
-
-    let stats = queries::get_iron_mic_stats(&pool, interval.start, interval.end, now, 100).await;
+    let stats =
+        queries::get_iron_mic_stats(&pool, interval.start, interval.end, meta.requested_at, 50)
+            .await;
     match stats {
         Err(e) => match e {
             QueryError::Sql(_) => error_into_response(StatusCode::INTERNAL_SERVER_ERROR, ""),
             QueryError::IllegalArgs(msg) => error_into_response(StatusCode::BAD_REQUEST, msg),
         },
         Ok(stats) => {
-            let uptime_denominator = (cmp::min(interval.end, now) - interval.start).num_seconds();
+            let uptime_denominator =
+                (cmp::min(interval.end, meta.requested_at) - interval.start).num_seconds();
             let durations = stats
                 .into_iter()
                 .map(|s| CallsignDurationStats {
                     prefix: s.prefix,
                     suffix: s.suffix,
                     duration_seconds: s.duration_seconds,
-                    is_active: if now > interval.end {
+                    is_active: if meta.requested_at > interval.end {
                         None
                     } else {
                         Some(s.is_active)
@@ -75,8 +66,8 @@ pub async fn get_iron_mic_stats(
             (
                 StatusCode::OK,
                 Json(IronMicResponse {
-                    requested_at: now,
-                    last_datafeed_updated_at,
+                    requested_at: meta.requested_at,
+                    last_datafeed_updated_at: meta.last_datafeed_updated_at,
                     start: interval.start,
                     end: interval.end,
                     actual_elapsed_duration_seconds: uptime_denominator,
@@ -104,16 +95,9 @@ struct ActivityTimeSeriesResponse {
 /// On success, returns a [`axum::response::Response`] with [`StatusCode::OK`] and [`ActivityTimeSeriesResponse`] as JSON
 pub async fn get_activity_timeseries(
     State(pool): State<Pool<Postgres>>,
+    meta: DatafeedMetadata,
     interval: MaxDurationInterval<OneMonth>,
 ) -> impl IntoResponse {
-    let last_datafeed_updated_at = match get_latest_datafeed_updated_at(&pool).await {
-        Ok(Some(ts)) => ts,
-        Ok(None) => {
-            return error_into_response(StatusCode::SERVICE_UNAVAILABLE, "no datafeeds yet");
-        }
-        Err(_) => return error_into_response(StatusCode::INTERNAL_SERVER_ERROR, ""),
-    };
-
     match queries::get_activity_snapshots(&pool, interval.start, interval.end).await {
         Ok(points) => {
             let mut observations = Vec::with_capacity(points.len());
@@ -131,8 +115,8 @@ pub async fn get_activity_timeseries(
             (
                 StatusCode::OK,
                 Json(ActivityTimeSeriesResponse {
-                    requested_at: Utc::now(),
-                    last_datafeed_updated_at,
+                    requested_at: meta.requested_at,
+                    last_datafeed_updated_at: meta.last_datafeed_updated_at,
                     start: interval.start,
                     end: interval.end,
                     observations,
