@@ -124,7 +124,7 @@ pub async fn shutdown_listener(token: Option<CancellationToken>) {
 
 pub fn init_tracing_and_oltp(
     name: impl ToString,
-) -> Result<SdkTracerProvider, InitializationError> {
+) -> Result<(SdkTracerProvider, SdkMeterProvider), InitializationError> {
     // OpenTelemetry env vars that should be set at a minimum
     let env_vars = vec![
         "OTEL_SERVICE_NAME",
@@ -199,5 +199,5 @@ pub fn init_tracing_and_oltp(
         .with(telemetry_layer)
         .init();
 
-    Ok(tracer_provider)
+    Ok((tracer_provider, meter_provider))
 }

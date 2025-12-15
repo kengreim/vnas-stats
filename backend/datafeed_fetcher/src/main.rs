@@ -34,7 +34,7 @@ struct FetcherState {
 
 #[tokio::main]
 async fn main() -> Result<(), MainError> {
-    let tracer_provider = init_tracing_and_oltp("artcc_updater")?;
+    let (tracer_provider, meter_provider) = init_tracing_and_oltp("artcc_updater")?;
 
     // Set up config
     let config = load_config().unwrap_or_else(|e| {
@@ -148,6 +148,10 @@ async fn main() -> Result<(), MainError> {
     }
 
     if let Err(e) = tracer_provider.shutdown() {
+        eprintln!("failed to shut down tracer provider: {e:?}");
+    }
+
+    if let Err(e) = meter_provider.shutdown() {
         eprintln!("failed to shut down tracer provider: {e:?}");
     }
 

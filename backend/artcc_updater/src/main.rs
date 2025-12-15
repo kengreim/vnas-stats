@@ -27,7 +27,7 @@ pub struct AxumState {
 
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
-    let tracer_provider = init_tracing_and_oltp("artcc_updater")?;
+    let (tracer_provider, meter_provider) = init_tracing_and_oltp("artcc_updater")?;
 
     let config = load_config().map_err(InitializationError::from)?;
     info!(name: "config.loaded", config = ?config, "config loaded");
@@ -48,6 +48,10 @@ async fn main() -> Result<(), AppError> {
         .unwrap();
 
     if let Err(e) = tracer_provider.shutdown() {
+        eprintln!("failed to shut down tracer provider: {e:?}");
+    }
+
+    if let Err(e) = meter_provider.shutdown() {
         eprintln!("failed to shut down tracer provider: {e:?}");
     }
 

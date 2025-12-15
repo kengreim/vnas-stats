@@ -16,7 +16,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let tracer_provider = init_tracing_and_oltp("data_api")?;
+    let (tracer_provider, meter_provider) = init_tracing_and_oltp("data_api")?;
     let config = load_config()?;
     let pool = initialize_db(&config.postgres, false).await?;
 
@@ -42,8 +42,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         warn!(name: "axum.shutdown", error = ?e, "error while shutting down axum");
     }
 
-    if let Err(e_flush) = tracer_provider.shutdown() {
-        eprintln!("failed to shut down tracer provider: {e_flush:?}");
+    if let Err(e) = tracer_provider.shutdown() {
+        eprintln!("failed to shut down tracer provider: {e:?}");
+    }
+
+    if let Err(e) = meter_provider.shutdown() {
+        eprintln!("failed to shut down tracer provider: {e:?}");
     }
 
     res.map_err(|e| Box::new(e).into())
