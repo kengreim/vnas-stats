@@ -1,10 +1,10 @@
 use crate::v1::db::queries;
 use crate::v1::db::queries::{QueryError, get_latest_datafeed_updated_at};
-use crate::v1::handlers::{error_into_response};
-use crate::v1::extractors::params::{MaxDurationInterval, OneYear, OneMonth};
+use crate::v1::extractors::params::{MaxDurationInterval, OneMonth, OneYear};
 use crate::v1::traits::Session;
+use crate::v1::utils::error_into_response;
 use axum::Json;
-use axum::extract::{State};
+use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use chrono::{DateTime, Utc};
@@ -52,7 +52,8 @@ pub async fn get_iron_mic_stats(
         );
     };
 
-    let callsign_sessions = queries::get_callsign_sessions_between(&pool, interval.start, interval.end).await;
+    let callsign_sessions =
+        queries::get_callsign_sessions_between(&pool, interval.start, interval.end).await;
     match callsign_sessions {
         Err(e) => match e {
             QueryError::Sql(_) => error_into_response(StatusCode::INTERNAL_SERVER_ERROR, ""),
@@ -61,7 +62,9 @@ pub async fn get_iron_mic_stats(
         Ok(callsign_sessions) => {
             let mut map = HashMap::new();
             for session in callsign_sessions {
-                if let Ok(session_duration) = session.duration_seconds_within(interval.start, interval.end, now) {
+                if let Ok(session_duration) =
+                    session.duration_seconds_within(interval.start, interval.end, now)
+                {
                     map.entry((session.prefix, session.suffix))
                         .and_modify(|(duration, is_active)| {
                             *duration += session_duration;
@@ -79,7 +82,11 @@ pub async fn get_iron_mic_stats(
                         prefix,
                         suffix,
                         duration_seconds,
-                        is_active: if now > interval.end { None } else { Some(is_active) },
+                        is_active: if now > interval.end {
+                            None
+                        } else {
+                            Some(is_active)
+                        },
                     },
                 )
                 .collect::<Vec<_>>();

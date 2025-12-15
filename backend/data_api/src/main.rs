@@ -15,7 +15,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .export_to("./bindings.ts", &specta::export())?;
         return Ok(());
     }
-
     let (tracer_provider, meter_provider) = init_tracing_and_oltp("data_api")?;
     let config = load_config()?;
     let pool = initialize_db(&config.postgres, false).await?;

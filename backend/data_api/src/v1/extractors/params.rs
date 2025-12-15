@@ -1,14 +1,14 @@
+use crate::v1::utils::error_into_response;
 use axum::{
     extract::{FromRequestParts, Query},
-    http::{request::Parts, StatusCode},
-    response::{Response},
+    http::{StatusCode, request::Parts},
+    response::Response,
 };
 use chrono::{DateTime, Utc};
 use humantime;
 use serde::Deserialize;
 use std::marker::PhantomData;
 use std::time::Duration;
-use crate::v1::handlers::error_into_response;
 
 // This struct will be used to deserialize the raw query parameters
 #[derive(Debug, Deserialize)]
