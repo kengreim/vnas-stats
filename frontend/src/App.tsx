@@ -1,9 +1,7 @@
-import { createEffect, createSignal, For, onCleanup } from "solid-js";
-import { useQuery } from "@tanstack/solid-query";
+import { createEffect, createSignal, For, Show, onCleanup } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
-import { IronMicResponse } from "@/bindings";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import {
@@ -15,6 +13,7 @@ import {
   TableRow,
 } from "@/components/ui/Table";
 import { cn } from "~/libs/cn.ts";
+import { useIronMicStatsQuery } from "~/queries/iron-mic";
 
 dayjs.extend(utc);
 
@@ -32,15 +31,6 @@ const CATEGORY_LABELS: Record<CategoryKey, string> = {
   tower: "Tower (TWR)",
   tracon: "Tracon (APP/DEP)",
   center: "Center (CTR)",
-};
-
-const ironMicApiUrl = (start: string, end: string) => {
-  const apiBase = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
-  const base = apiBase.replace(/\/$/, "");
-
-  return `${base}/v1/callsigns/top?start=${encodeURIComponent(
-    start,
-  )}&end=${encodeURIComponent(end)}`;
 };
 
 type LeaderboardItem = {
@@ -68,21 +58,13 @@ export default function App() {
     center: [],
   });
 
-  const query = useQuery(() => ({
-    queryKey: ["iron-mic", start(), end()],
-    queryFn: async (): Promise<IronMicResponse> => {
-      const resp = await fetch(ironMicApiUrl(start(), end()));
-      if (!resp.ok) {
-        throw new Error(`Failed to load stats: ${resp.status}`);
-      }
-      setNextRefreshAt(Date.now() + REFETCH_INTERVAL);
-      return resp.json();
-    },
-    refetchInterval: REFETCH_INTERVAL,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-    retry: false,
-  }));
+  const query = useIronMicStatsQuery(start, end);
+
+  createEffect(() => {
+    if (query.dataUpdatedAt) {
+      setNextRefreshAt(query.dataUpdatedAt + REFETCH_INTERVAL);
+    }
+  });
 
   createEffect(() => {
     const id = setInterval(() => {
@@ -148,76 +130,87 @@ export default function App() {
   });
 
   return (
-    <main class="h-dvh bg-background">
-      {query.isPending && <p>Loading…</p>}
-      {query.error && <p class="error">{(query.error as Error).message}</p>}
-
-      {store && (
-        <div class="flex justify-center space-x-16">
-          <For each={["ground", "tower", "tracon", "center"] as CategoryKey[]}>
-            {(key) => {
-              return (
-                <section class="card" aria-label={CATEGORY_LABELS[key]}>
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>{CATEGORY_LABELS[key]}</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <Table class="text-md table-auto font-mono">
-                        <TableHeader>
+    <div>
+      <p class="text-xs tracking-[0.2em] text-muted-foreground uppercase">Iron Mic</p>
+      <h1 class="text-2xl font-semibold">Current Month</h1>
+      <Show when={query.data}>
+        {(data) => (
+          <p class="text-sm text-muted-foreground">
+            {formatDateUtc(data().start)} → {formatDateUtc(data().end)}
+            {countdown() != null && (
+              <>
+                {" "}
+                · Next update in <span class="font-semibold text-foreground">{countdown()}s</span>
+              </>
+            )}
+          </p>
+        )}
+      </Show>
+      <main class="flex-1 overflow-y-auto px-6 py-6">
+        <div class="flex flex-col gap-6">
+          {/*<ActivityChart start={start()} end={end()} />*/}
+          <Show when={query.error}>
+            {(err) => <p class="text-destructive">Error: {(err() as Error).message}</p>}
+          </Show>
+          <div class="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
+            <For each={["ground", "tower", "tracon", "center"] as CategoryKey[]}>
+              {(key) => (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>{CATEGORY_LABELS[key]}</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <Table class="text-md table-auto font-mono">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>#</TableHead>
+                          <TableHead>Callsign</TableHead>
+                          <TableHead class="text-right">Duration</TableHead>
+                          <TableHead class="text-right">Uptime %</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        <For each={store[key]}>
+                          {(item, index) => (
+                            <TableRow>
+                              <TableCell class="py-1">{index() + 1}</TableCell>
+                              <TableCell class="py-1">
+                                <div
+                                  class={cn("w-fit rounded-md px-2 py-1", {
+                                    "bg-emerald-700 font-bold text-primary-foreground":
+                                      item.isActive,
+                                    "bg-muted text-foreground": !item.isActive,
+                                  })}
+                                >
+                                  {item.prefix}_{item.suffix}
+                                </div>
+                              </TableCell>
+                              <TableCell class="py-1 text-right">
+                                {formatDuration(item.duration)}
+                              </TableCell>
+                              <TableCell class="py-1 text-right">
+                                {item.uptimePercent.toFixed(1)}%
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </For>
+                        <Show when={store[key].length === 0}>
                           <TableRow>
-                            <TableHead>#</TableHead>
-                            <TableHead>Callsign</TableHead>
-                            <TableHead class="text-right">Duration</TableHead>
-                            <TableHead class="text-right">Uptime %</TableHead>
+                            <TableCell class="py-4 text-sm text-muted-foreground" colSpan={4}>
+                              No data for this window.
+                            </TableCell>
                           </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          <For each={store[key]}>
-                            {(item, index) => (
-                              <TableRow>
-                                <TableCell class="py-1">{index() + 1}</TableCell>
-                                <TableCell class="py-1">
-                                  <div
-                                    class={cn("rounded-md p-1", {
-                                      "bg-emerald-700 font-bold text-muted": item.isActive,
-                                    })}
-                                  >
-                                    {item.prefix}_{item.suffix}
-                                  </div>
-                                </TableCell>
-                                <TableCell class="py-1 text-right">
-                                  {formatDuration(item.duration)}
-                                </TableCell>
-                                <TableCell class="py-1 text-right">
-                                  {item.uptimePercent.toFixed(1)}%
-                                </TableCell>
-                              </TableRow>
-                            )}
-                          </For>
-                        </TableBody>
-                      </Table>
-                    </CardContent>
-                  </Card>
-                </section>
-              );
-            }}
-          </For>
+                        </Show>
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+              )}
+            </For>
+          </div>
         </div>
-      )}
-      <header>
-        <div>
-          <h1>Iron Mic · Current Month</h1>
-          {query.data && (
-            <p class="muted">
-              Window: {formatDateUtc(query.data.start)} → {formatDateUtc(query.data.end)} ·{" "}
-              {countdown() != null ? `Next update ~${countdown()}s` : "Window ended"}
-            </p>
-          )}
-        </div>
-        {query.isFetching && <span class="badge">Refreshing…</span>}
-      </header>
-    </main>
+      </main>
+    </div>
   );
 }
 

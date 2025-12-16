@@ -39,7 +39,7 @@ pub async fn get_iron_mic_stats(
     interval: MaxDurationInterval<OneYear>,
 ) -> Result<impl IntoResponse, ErrorMessage> {
     let stats =
-        queries::get_iron_mic_stats(&pool, interval.start, interval.end, meta.requested_at, 50)
+        queries::get_iron_mic_stats(&pool, interval.start, interval.end, meta.requested_at, 150)
             .await;
     match stats {
         Err(e) => match e {
