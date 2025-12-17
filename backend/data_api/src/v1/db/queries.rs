@@ -25,9 +25,9 @@ pub async fn get_iron_mic_stats(
     limit: i64,
 ) -> Result<Vec<CallsignDurationStatsRecord>, QueryError> {
     if end <= start {
-        return Err(QueryError::IllegalArgs(
-            "end must be greater than start".to_owned(),
-        ));
+        return Err(QueryError::IllegalArgs(format!(
+            "end must be greater than start. end = {end:?}. start = {start:?}"
+        )));
     }
 
     sqlx::query_as::<_, CallsignDurationStatsRecord>(
@@ -60,7 +60,7 @@ pub async fn get_iron_mic_stats(
 
 pub async fn get_latest_datafeed_updated_at(
     pool: &Pool<Postgres>,
-) -> Result<Option<DateTime<Utc>>, sqlx::Error> {
+) -> Result<Option<DateTime<Utc>>, QueryError> {
     sqlx::query_scalar::<_, DateTime<Utc>>(
         r"
         SELECT max(updated_at)
@@ -69,6 +69,7 @@ pub async fn get_latest_datafeed_updated_at(
     )
     .fetch_optional(pool)
     .await
+    .map_err(QueryError::Sql)
 }
 
 #[derive(sqlx::FromRow)]
@@ -86,9 +87,9 @@ pub async fn get_activity_snapshots(
     end: DateTime<Utc>,
 ) -> Result<Vec<ActivitySnapshot>, QueryError> {
     if end <= start {
-        return Err(QueryError::IllegalArgs(
-            "end must be greater than start".to_owned(),
-        ));
+        return Err(QueryError::IllegalArgs(format!(
+            "end must be greater than start. end = {end:?}. start = {start:?}"
+        )));
     }
 
     sqlx::query_as::<_, ActivitySnapshot>(

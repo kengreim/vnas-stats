@@ -20,6 +20,7 @@ opentelemetry-resource-detectors.workspace = true
 tracing-opentelemetry.workspace = true
 tracing-subscriber.workspace = true
 opentelemetry-appender-tracing.workspace = true
+reqwest.workspace = true
 
 [dev-dependencies]
 reqwest.workspace = true

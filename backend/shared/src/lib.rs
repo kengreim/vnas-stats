@@ -1,3 +1,4 @@
+pub mod vatsim;
 pub mod vnas;
 
 use crate::error::InitializationError::MissingEnvVar;
@@ -32,20 +33,31 @@ pub const DATAFEED_QUEUE_NAME: &str = "vnas_stats";
 pub const ENV_VAR_PREFIX: &str = "VNAS_STATS__";
 pub const SETTINGS_FILE: &str = "Settings.toml";
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Config {
     pub postgres: PostgresConfig,
     pub fetcher: Option<FetcherConfig>,
+    pub oauth: Option<OAuthConfig>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct PostgresConfig {
     pub connection_string: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct FetcherConfig {
     pub interval_seconds: u64,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct OAuthConfig {
+    pub client_id: String,
+    pub client_secret: String,
+    pub auth_url: String,
+    pub token_url: String,
+    pub user_info_url: String,
+    pub redirect_url: String,
 }
 
 pub fn load_config() -> Result<Config, ConfigError> {

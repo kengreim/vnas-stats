@@ -4,10 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-axum = { workspace = true }
+axum = { workspace = true, features = ["macros"] }
 tokio = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 serde = { workspace = true }
 shared = { path = "../shared" }
 sqlx = { workspace = true }
@@ -18,3 +17,8 @@ tower-http = { workspace = true, features = ["cors", "compression-full"] }
 specta.workspace = true
 specta-typescript.workspace = true
 humantime = { workspace = true }
+tower-sessions.workspace = true
+tower-sessions-sqlx-store = { workspace = true, features = ["postgres"] }
+oauth2.workspace = true
+reqwest = { workspace = true, features = ["json"] }
+anyhow.workspace = true

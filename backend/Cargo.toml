@@ -10,7 +10,7 @@ tracing = "0.1.43"
 tracing-subscriber = { version = "0.3.22", features = ["json", "env-filter"] }
 tokio = { version = "1.48.0", features = ["full"] }
 figment = { version = "0.10.19", features = ["toml", "env"] }
-reqwest = { version = "0.12.25", features = ["json"] }
+reqwest = { version = "0.12.26", features = ["json"] }
 sqlx = { version = "0.8.3", features = ["runtime-tokio", "tls-native-tls", "postgres", "migrate", "chrono", "uuid", "json"] }
 thiserror = "2.0.17"
 uuid = { version = "1.19.0", features = ["v7", "serde"] }
@@ -28,4 +28,8 @@ tonic = { version = "0.14.2" }
 opentelemetry-resource-detectors = { version = "0.10.0" }
 tracing-opentelemetry = "0.32.0"
 opentelemetry-appender-tracing = "0.31.1"
-humantime = "2.1.0"
+humantime = "2.3.0"
+anyhow = "1.0.100"
+tower-sessions = "0.14.0"
+tower-sessions-sqlx-store = { version = "0.15.0", features = ["postgres"] }
+oauth2 = "5.0.0"

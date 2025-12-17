@@ -1,8 +1,8 @@
 mod api_models;
 mod db;
+mod error;
 mod extractors;
 mod handlers;
 mod router;
-mod utils;
 
 pub use router::router;
