@@ -1,5 +1,7 @@
 use crate::state::{HttpClients, OauthClient};
 use crate::v1::error::ApiError;
+use crate::v1::session::AuthUser;
+use crate::v1::session::constants::{CSRF_TOKEN_KEY, PKCE_VERIFIER_KEY, SESSION_USER_KEY};
 use axum::{
     Json,
     extract::{Query, State},
@@ -7,19 +9,9 @@ use axum::{
     response::{IntoResponse, Redirect},
 };
 use oauth2::{AuthorizationCode, CsrfToken, PkceCodeChallenge, Scope, TokenResponse};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use shared::vatsim;
 use tower_sessions::Session;
-
-// The key used in the session to store the user
-const SESSION_USER_KEY: &str = "user";
-const CSRF_TOKEN_KEY: &str = "oauth_csrf";
-const PKCE_VERIFIER_KEY: &str = "oauth_pkce_verifier";
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct AuthUser {
-    pub cid: String,
-}
 
 #[derive(Deserialize)]
 pub struct AuthCallbackParams {
@@ -35,7 +27,7 @@ pub async fn login(
 
     let (auth_url, csrf_token) = oauth_client
         .authorize_url(CsrfToken::new_random)
-        .add_scope(Scope::new(shared::vatsim::Scope::VatsimDetails.to_string()))
+        .add_scope(Scope::new(vatsim::Scope::VatsimDetails.to_string()))
         .set_pkce_challenge(pkce_challenge)
         .url();
 
@@ -79,8 +71,11 @@ pub async fn callback(
         vatsim::fetch_user_details(&http_clients.standard, token_result.access_token().secret())
             .await?;
 
-    let auth_user = AuthUser { cid: user_data.cid };
-    session.insert(SESSION_USER_KEY, auth_user).await?;
+    let cid = user_data
+        .cid
+        .parse::<u32>()
+        .map_err(|_| ApiError::CidParseError(user_data.cid.clone()))?;
+    session.insert(SESSION_USER_KEY, AuthUser { cid }).await?;
 
     // Redirect to frontend root
     Ok(Redirect::to("/"))

@@ -34,6 +34,10 @@ pub enum ApiError {
     QueryError(#[from] QueryError),
     #[error("service unavailable: {0}")]
     ServiceUnavailable(String),
+    #[error("authorization required")]
+    AuthRequired,
+    #[error("unable to parse {0} as CID")]
+    CidParseError(String),
 }
 
 impl IntoResponse for ApiError {
@@ -90,6 +94,16 @@ impl IntoResponse for ApiError {
             ApiError::ServiceUnavailable(e) => {
                 warn!(error = e, "service unavailable");
                 ErrorMessage::from((StatusCode::SERVICE_UNAVAILABLE, "")).into_response()
+            }
+            ApiError::AuthRequired => {
+                // Don't need to log an error here as it's not a server-side error
+                ErrorMessage::from((StatusCode::UNAUTHORIZED, "authentication required"))
+                    .into_response()
+            }
+            ApiError::CidParseError(e) => {
+                warn!(cid_string = e, "unable to parse string as CID");
+                ErrorMessage::from((StatusCode::INTERNAL_SERVER_ERROR, "unable to parse CID"))
+                    .into_response()
             }
         }
     }

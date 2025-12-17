@@ -68,7 +68,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let app = Router::new()
         .route("/health", get(|| async { StatusCode::OK }))
-        .nest("/v1", v1::router())
+        .nest("/v1", v1::router(state.clone()))
         .layer(session_layer)
         .layer(CompressionLayer::new())
         .layer(
