@@ -11,6 +11,7 @@ use axum::{
 use oauth2::{AuthorizationCode, CsrfToken, PkceCodeChallenge, Scope, TokenResponse};
 use serde::Deserialize;
 use shared::vatsim;
+use shared::vatsim::OauthEnvironment;
 use tower_sessions::Session;
 
 #[derive(Deserialize)]
@@ -38,6 +39,7 @@ pub async fn login(
 
 pub async fn callback(
     State(oauth_client): State<OauthClient>,
+    State(oauth_env): State<OauthEnvironment>,
     State(http_clients): State<HttpClients>,
     session: Session,
     Query(params): Query<AuthCallbackParams>,
@@ -65,9 +67,12 @@ pub async fn callback(
         .await?;
 
     // Fetch VATSIM user details
-    let user_data =
-        vatsim::fetch_user_details(&http_clients.standard, token_result.access_token().secret())
-            .await?;
+    let user_data = vatsim::fetch_user_details(
+        &http_clients.standard,
+        oauth_env,
+        token_result.access_token().secret(),
+    )
+    .await?;
 
     let cid = user_data
         .cid

@@ -6,6 +6,7 @@ use oauth2::{
         BasicTokenResponse,
     },
 };
+use shared::vatsim::OauthEnvironment;
 use sqlx::{Pool, Postgres};
 
 pub type OauthClient = Client<
@@ -25,6 +26,7 @@ pub type OauthClient = Client<
 pub struct AppState {
     pub db: Db,
     pub oauth_client: OauthClient,
+    pub oauth_env: OauthEnvironment,
     pub http_clients: HttpClients,
 }
 

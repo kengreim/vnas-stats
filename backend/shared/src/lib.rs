@@ -3,6 +3,7 @@ pub mod vnas;
 
 use crate::error::InitializationError::MissingEnvVar;
 use crate::error::{ConfigError, InitializationError};
+use crate::vatsim::OauthEnvironment;
 use figment::Figment;
 use figment::providers::{Env, Format, Toml};
 use opentelemetry::global;
@@ -52,12 +53,10 @@ pub struct FetcherConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct OAuthConfig {
-    pub client_id: String,
+    pub client_id: i32,
     pub client_secret: String,
-    pub auth_url: String,
-    pub token_url: String,
-    pub user_info_url: String,
     pub redirect_url: String,
+    pub environment: OauthEnvironment,
 }
 
 pub fn load_config() -> Result<Config, ConfigError> {

@@ -6,6 +6,7 @@ use anyhow::anyhow;
 use axum::http::StatusCode;
 use axum::{Router, routing::get};
 use oauth2::{AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenUrl, basic::BasicClient};
+use shared::vatsim::OauthEndpoints;
 use shared::{init_tracing_and_oltp, initialize_db, load_config};
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::{Any, CorsLayer};
@@ -46,16 +47,18 @@ async fn main() -> Result<(), anyhow::Error> {
             tower_sessions::cookie::time::Duration::days(7),
         ));
 
-    let oauth_client = if let Some(oauth_config) = config.oauth {
-        BasicClient::new(ClientId::new(oauth_config.client_id))
-            .set_client_secret(ClientSecret::new(oauth_config.client_secret))
-            .set_auth_uri(AuthUrl::new(oauth_config.auth_url)?)
-            .set_token_uri(TokenUrl::new(oauth_config.token_url)?)
-            .set_redirect_uri(RedirectUrl::new(oauth_config.redirect_url)?)
-    } else {
+    let Some(oauth_config) = config.oauth else {
         error!(name: "config.oauth.loaded", "OAuth client not configured, required for data_api");
         anyhow::bail!("OAuth client not configured, required for data_api");
     };
+
+    let endpoints = OauthEndpoints::from(oauth_config.environment);
+
+    let oauth_client = BasicClient::new(ClientId::new(oauth_config.client_id.to_string()))
+        .set_client_secret(ClientSecret::new(oauth_config.client_secret))
+        .set_auth_uri(AuthUrl::new(endpoints.auth_url)?)
+        .set_token_uri(TokenUrl::new(endpoints.token_url)?)
+        .set_redirect_uri(RedirectUrl::new(oauth_config.redirect_url)?);
 
     let standard_http_client = reqwest::ClientBuilder::new().build()?;
     let no_redirect_http_client = reqwest::ClientBuilder::new()
@@ -65,6 +68,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let state = state::AppState {
         db: Db { pool },
         oauth_client,
+        oauth_env: oauth_config.environment,
         http_clients: HttpClients {
             standard: standard_http_client,
             no_redirect: no_redirect_http_client,
@@ -78,10 +82,9 @@ async fn main() -> Result<(), anyhow::Error> {
         .layer(CompressionLayer::new())
         .layer(
             CorsLayer::new()
-                .allow_origin(["http://localhost:5173".parse().unwrap()])
+                .allow_origin(Any)
                 .allow_methods(Any)
-                .allow_headers(Any)
-                .allow_credentials(true),
+                .allow_headers(Any),
         )
         .with_state(state);
 
