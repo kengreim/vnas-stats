@@ -2,6 +2,7 @@ mod state;
 mod v1;
 
 use crate::state::{Db, HttpClients};
+use anyhow::anyhow;
 use axum::http::StatusCode;
 use axum::{Router, routing::get};
 use oauth2::{AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenUrl, basic::BasicClient};
@@ -26,7 +27,11 @@ async fn main() -> Result<(), anyhow::Error> {
     info!(name: "config.loaded", config = ?config, "config loaded");
     let pool = initialize_db(&config.postgres, false).await?;
 
-    let session_store = PostgresStore::new(pool.clone());
+    let session_store = PostgresStore::new(pool.clone())
+        .with_schema_name("data_api")
+        .map_err(|e| anyhow!("{e}"))?
+        .with_table_name("sessions")
+        .map_err(|e| anyhow!("{e}"))?;
 
     let cleanup_handle = tokio::spawn(
         session_store
