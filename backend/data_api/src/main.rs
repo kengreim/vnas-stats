@@ -8,7 +8,7 @@ use oauth2::{AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenUrl, basic::Basi
 use shared::{init_tracing_and_oltp, initialize_db, load_config};
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::{Any, CorsLayer};
-use tower_sessions::{Expiry, SessionManagerLayer};
+use tower_sessions::{ExpiredDeletion, Expiry, SessionManagerLayer};
 use tower_sessions_sqlx_store::PostgresStore;
 use tracing::{error, info, warn};
 
@@ -27,7 +27,12 @@ async fn main() -> Result<(), anyhow::Error> {
     let pool = initialize_db(&config.postgres, false).await?;
 
     let session_store = PostgresStore::new(pool.clone());
-    session_store.migrate().await?;
+
+    let cleanup_handle = tokio::spawn(
+        session_store
+            .clone() // Clone store if it needs to be moved/shared
+            .continuously_delete_expired(tokio::time::Duration::from_secs(60)), // Clean every 60s
+    );
 
     let session_layer = SessionManagerLayer::new(session_store)
         .with_secure(false)
@@ -87,6 +92,12 @@ async fn main() -> Result<(), anyhow::Error> {
         warn!(name: "axum.shutdown", error = ?e, "error while shutting down axum");
     }
 
+    info!(name:"sessions.shutdown", "cleaning up session cleanup task");
+    cleanup_handle.abort();
+    if let Err(e) = cleanup_handle.await {
+        warn!(name: "sessions.shutdown", error = ?e, "failed to end session cleanup task");
+    }
+
     if let Err(e) = tracer_provider.shutdown() {
         eprintln!("failed to shut down tracer provider: {e:?}");
     }
@@ -95,5 +106,5 @@ async fn main() -> Result<(), anyhow::Error> {
         eprintln!("failed to shut down tracer provider: {e:?}");
     }
 
-    res.map_err(|e| Box::new(e).into())
+    Ok(res?)
 }
