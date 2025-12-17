@@ -1,7 +1,7 @@
 use crate::state::{HttpClients, OauthClient};
 use crate::v1::error::ApiError;
+use crate::v1::session;
 use crate::v1::session::AuthUser;
-use crate::v1::session::constants::{CSRF_TOKEN_KEY, PKCE_VERIFIER_KEY, SESSION_USER_KEY};
 use axum::{
     Json,
     extract::{Query, State},
@@ -31,8 +31,7 @@ pub async fn login(
         .set_pkce_challenge(pkce_challenge)
         .url();
 
-    session.insert(CSRF_TOKEN_KEY, csrf_token.secret()).await?;
-    session.insert(PKCE_VERIFIER_KEY, pkce_verifier).await?;
+    session::insert_csrf_and_pkce(&session, csrf_token, pkce_verifier).await?;
 
     Ok(Redirect::to(auth_url.as_str()))
 }
@@ -44,7 +43,7 @@ pub async fn callback(
     Query(params): Query<AuthCallbackParams>,
 ) -> Result<impl IntoResponse, ApiError> {
     // Verify CSRF
-    let stored_csrf: Option<String> = session.get(CSRF_TOKEN_KEY).await?;
+    let stored_csrf = session::get_csrf_token(&session).await?;
 
     if stored_csrf.is_none() {
         return Err(ApiError::MissingCsrfToken);
@@ -54,8 +53,7 @@ pub async fn callback(
         return Err(ApiError::InvalidCsrfToken(params.state));
     }
 
-    let pkce_verifier = session
-        .get(PKCE_VERIFIER_KEY)
+    let pkce_verifier = session::get_pkce_verifier(&session)
         .await?
         .ok_or(ApiError::MissingPkceVerifier)?;
 
@@ -75,7 +73,7 @@ pub async fn callback(
         .cid
         .parse::<u32>()
         .map_err(|_| ApiError::CidParseError(user_data.cid.clone()))?;
-    session.insert(SESSION_USER_KEY, AuthUser { cid }).await?;
+    session::insert_user(&session, AuthUser { cid }).await?;
 
     // Redirect to frontend root
     Ok(Redirect::to("/"))
@@ -86,10 +84,10 @@ pub async fn logout(session: Session) -> Result<impl IntoResponse, ApiError> {
     Ok(Redirect::to("/"))
 }
 
-pub async fn me(session: Session) -> impl IntoResponse {
-    let user: Option<AuthUser> = session.get(SESSION_USER_KEY).await.unwrap_or(None);
+pub async fn me(session: Session) -> Result<impl IntoResponse, ApiError> {
+    let user = session::get_user(&session).await?;
     match user {
-        Some(u) => (StatusCode::OK, Json(Some(u))).into_response(),
-        None => (StatusCode::UNAUTHORIZED, Json(None::<AuthUser>)).into_response(),
+        Some(u) => Ok((StatusCode::OK, Json(Some(u))).into_response()),
+        None => Ok((StatusCode::UNAUTHORIZED, Json(None::<AuthUser>)).into_response()),
     }
 }
