@@ -1,17 +1,24 @@
-import { createRouter, Route, RootRoute, Outlet } from "@tanstack/solid-router";
+import { createRouter, Outlet, createRootRoute, createRoute } from "@tanstack/solid-router";
 import App from "./App";
+import { Privacy } from "~/components/Privacy.tsx";
 
-const rootRoute = new RootRoute({
-  component: () => <div><Outlet /></div>,
+const rootRoute = createRootRoute({
+  component: () => <Outlet />,
 });
 
-const indexRoute = new Route({
+// const indexRoute = createRoute({
+//   getParentRoute: () => rootRoute,
+//   path: "/",
+//   component: App,
+// });
+
+const privacyRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: "/",
-  component: App,
+  path: "/privacy",
+  component: Privacy,
 });
 
-const routeTree = rootRoute.addChildren([indexRoute]);
+const routeTree = rootRoute.addChildren([privacyRoute]);
 
 export const router = createRouter({ routeTree });
 

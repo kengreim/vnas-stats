@@ -49,21 +49,21 @@ const LogoButton = () => {
 const FullNav = () => {
   return (
     <NavigationMenu>
-      <NavigationMenuItem>
-        <NavigationMenuTrigger>Test</NavigationMenuTrigger>
-      </NavigationMenuItem>
-      <NavigationMenuTrigger as="a" href="https://github.com/kobaltedev/kobalte" target="_blank">
-        GitHub
-      </NavigationMenuTrigger>
-      <NavigationMenuTrigger as="a" href="https://github.com/kobaltedev/kobalte" target="_blank">
-        GitHub
-      </NavigationMenuTrigger>
-      <NavigationMenuTrigger as="a" href="https://github.com/kobaltedev/kobalte" target="_blank">
-        GitHub
-      </NavigationMenuTrigger>
-      <NavigationMenuTrigger as="a" href="https://github.com/kobaltedev/kobalte" target="_blank">
-        GitHub
-      </NavigationMenuTrigger>
+      {/*<NavigationMenuItem>*/}
+      {/*  <NavigationMenuTrigger>Test</NavigationMenuTrigger>*/}
+      {/*</NavigationMenuItem>*/}
+      {/*<NavigationMenuTrigger as="a" href="https://github.com/kobaltedev/kobalte" target="_blank">*/}
+      {/*  GitHub*/}
+      {/*</NavigationMenuTrigger>*/}
+      {/*<NavigationMenuTrigger as="a" href="https://github.com/kobaltedev/kobalte" target="_blank">*/}
+      {/*  GitHub*/}
+      {/*</NavigationMenuTrigger>*/}
+      {/*<NavigationMenuTrigger as="a" href="https://github.com/kobaltedev/kobalte" target="_blank">*/}
+      {/*  GitHub*/}
+      {/*</NavigationMenuTrigger>*/}
+      {/*<NavigationMenuTrigger as="a" href="https://github.com/kobaltedev/kobalte" target="_blank">*/}
+      {/*  GitHub*/}
+      {/*</NavigationMenuTrigger>*/}
     </NavigationMenu>
   );
 };

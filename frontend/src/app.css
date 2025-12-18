@@ -4,6 +4,8 @@
 @import "tw-animate-css";
 @import "tailwindcss" source("../src");
 
+@plugin "@tailwindcss/typography";
+
 :root {
     --background: hsl(223.8136 -172.5242% 100.0000%);
     --foreground: hsl(223.8136 0.0000% 3.9388%);
@@ -163,14 +165,30 @@
     --shadow-lg: var(--shadow-lg);
     --shadow-xl: var(--shadow-xl);
     --shadow-2xl: var(--shadow-2xl);
+
+    --tw-prose-body: var(--color-foreground);
+    --tw-prose-headings: var(--color-foreground);
+    --tw-prose-links: var(--color-primary);
+    --tw-prose-bold: var(--color-foreground);
+    --tw-prose-counters: hsl(var(--muted-foreground));
+    --tw-prose-bullets: hsl(var(--muted-foreground));
+    --tw-prose-hr: var(--color-border);
+    --tw-prose-quotes: var(--color-foreground);
+    --tw-prose-quote-borders: var(--color-border);
+    --tw-prose-captions: hsl(var(--muted-foreground));
+    --tw-prose-code: var(--color-foreground);
+    --tw-prose-pre-code: hsl(var(--secondary-foreground));
+    --tw-prose-pre-bg: hsl(var(--secondary));
+    --tw-prose-th-borders: var(--color-border);
+    --tw-prose-td-borders: var(--color-border);
 }
 
 @layer base {
-  *,
-  ::after,
-  ::before,
-  ::backdrop,
-  ::file-selector-button {
-    border-color: var(--border, currentColor);
-  }
+    *,
+    ::after,
+    ::before,
+    ::backdrop,
+    ::file-selector-button {
+        border-color: var(--border, currentColor);
+    }
 }

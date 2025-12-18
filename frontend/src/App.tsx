@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/Table";
 import { cn } from "~/libs/cn.ts";
 import { useIronMicStatsQuery } from "~/queries/iron-mic";
+import { Layout } from "~/components/layout/Layout.tsx";
 
 dayjs.extend(utc);
 
@@ -130,7 +131,7 @@ export default function App() {
   });
 
   return (
-    <div>
+    <Layout>
       <p class="text-xs tracking-[0.2em] text-muted-foreground uppercase">Iron Mic</p>
       <h1 class="text-2xl font-semibold">Current Month</h1>
       <Show when={query.data}>
@@ -210,7 +211,7 @@ export default function App() {
           </div>
         </div>
       </main>
-    </div>
+    </Layout>
   );
 }
 

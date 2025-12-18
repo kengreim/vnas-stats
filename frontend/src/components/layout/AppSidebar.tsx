@@ -3,7 +3,11 @@ import {
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarHeader,
+  SidebarMenu,
+  SidebarMenuItem,
 } from "@/components/ui/Sidebar";
 
 export function AppSidebar() {
@@ -11,8 +15,16 @@ export function AppSidebar() {
     <Sidebar>
       <SidebarHeader />
       <SidebarContent>
-        <SidebarGroup />
-        <SidebarGroup />
+        <SidebarGroup>
+          <SidebarGroupLabel>Test</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>1</SidebarMenuItem>
+              <SidebarMenuItem>2</SidebarMenuItem>
+              <SidebarMenuItem>3</SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
       </SidebarContent>
       <SidebarFooter />
     </Sidebar>
