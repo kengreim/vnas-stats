@@ -12,12 +12,12 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/auth/callback", get(callback))
         .route("/auth/logout", get(logout))
         .route("/auth/me", get(me))
+        .route("/callsigns/top", get(get_iron_mic_stats))
         .merge(protected_routes(&state))
 }
 
 pub fn protected_routes(state: &AppState) -> Router<AppState> {
     Router::<AppState>::new()
-        .route("/callsigns/top", get(get_iron_mic_stats))
         .route("/activity/timeseries", get(get_activity_timeseries))
         .route_layer(from_fn_with_state(state.clone(), require_auth))
 }

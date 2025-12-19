@@ -7,24 +7,25 @@ import {
   redirect,
 } from "@tanstack/solid-router";
 import { Privacy } from "~/components/Privacy.tsx";
+import App from "~/App.tsx";
 
 const rootRoute = createRootRoute({
   component: () => <Outlet />,
 });
 
-// const indexRoute = createRoute({
-//   getParentRoute: () => rootRoute,
-//   path: "/",
-//   component: App,
-// });
-
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
-  loader: () => {
-    throw redirect({ to: "/privacy" });
-  },
+  component: App,
 });
+
+// const indexRoute = createRoute({
+//   getParentRoute: () => rootRoute,
+//   path: "/",
+//   loader: () => {
+//     throw redirect({ to: "/privacy" });
+//   },
+// });
 
 const privacyRoute = createRoute({
   getParentRoute: () => rootRoute,
