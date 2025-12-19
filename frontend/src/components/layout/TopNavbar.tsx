@@ -10,6 +10,7 @@ import {
   NavigationMenuLink,
   NavigationMenuTrigger,
 } from "~/components/ui/NavigationMenu";
+import { Link } from "@tanstack/solid-router";
 
 export const TopNavbar = () => {
   const isSmall = createMediaQuery("(max-width: 767px)");
@@ -37,21 +38,22 @@ const MobileNav = () => {
 
 const LogoButton = () => {
   return (
-    <button
-      onClick={(e) => e.preventDefault()}
-      class="flex cursor-pointer items-center space-x-2 text-primary transition-colors hover:text-primary/90"
-    >
-      <img class="w-48" src="/images/logo.png" alt="logo" />
-    </button>
+    <Link to="/">
+      <div class="flex cursor-pointer items-center space-x-2 text-primary transition-colors hover:text-primary/90">
+        <img class="w-48" src="/images/logo.png" alt="logo" />
+      </div>
+    </Link>
   );
 };
 
 const FullNav = () => {
   return (
     <NavigationMenu>
-      {/*<NavigationMenuItem>*/}
-      {/*  <NavigationMenuTrigger>Test</NavigationMenuTrigger>*/}
-      {/*</NavigationMenuItem>*/}
+      <NavigationMenuItem>
+        <NavigationMenuTrigger>
+          <Link to="/privacy">Privacy</Link>
+        </NavigationMenuTrigger>
+      </NavigationMenuItem>
       {/*<NavigationMenuTrigger as="a" href="https://github.com/kobaltedev/kobalte" target="_blank">*/}
       {/*  GitHub*/}
       {/*</NavigationMenuTrigger>*/}
