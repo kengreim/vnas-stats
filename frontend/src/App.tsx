@@ -133,17 +133,16 @@ export default function App() {
   return (
     <Layout>
       <main class="flex-1 overflow-y-auto px-6 py-6">
-        <p className="text-xs tracking-[0.2em] text-muted-foreground uppercase">Iron Mic</p>
-        <h1 className="text-2xl font-semibold">Current Month</h1>
+        <p class="text-xs tracking-[0.2em] text-muted-foreground uppercase">Iron Mic</p>
+        <h1 class="text-2xl font-semibold">Current Month</h1>
         <Show when={query.data}>
           {(data) => (
-            <p className="text-sm text-muted-foreground">
+            <p class="text-sm text-muted-foreground">
               {formatDateUtc(data().start)} → {formatDateUtc(data().end)}
               {countdown() != null && (
                 <>
                   {" "}
-                  · Next update in{" "}
-                  <span className="font-semibold text-foreground">{countdown()}s</span>
+                  · Next update in <span class="font-semibold text-foreground">{countdown()}s</span>
                 </>
               )}
             </p>
@@ -152,7 +151,7 @@ export default function App() {
         <div class="flex flex-col gap-6">
           {/*<ActivityChart start={start()} end={end()} />*/}
           <Show when={query.error}>
-            {(err) => <p className="text-destructive">Error: {(err() as Error).message}</p>}
+            {(err) => <p class="text-destructive">Error: {(err() as Error).message}</p>}
           </Show>
           <div class="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
             <For each={["ground", "tower", "tracon", "center"] as CategoryKey[]}>
