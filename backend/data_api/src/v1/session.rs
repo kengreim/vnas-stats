@@ -21,16 +21,16 @@ pub async fn get_user(
     session.get(SESSION_USER_KEY).await
 }
 
-pub async fn get_csrf_token(
+pub async fn remove_csrf_token(
     session: &Session,
 ) -> Result<Option<String>, tower_sessions::session::Error> {
-    session.get(CSRF_TOKEN_KEY).await
+    session.remove(CSRF_TOKEN_KEY).await
 }
 
-pub async fn get_pkce_verifier(
+pub async fn remove_pkce_verifier(
     session: &Session,
 ) -> Result<Option<PkceCodeVerifier>, tower_sessions::session::Error> {
-    session.get(PKCE_VERIFIER_KEY).await
+    session.remove(PKCE_VERIFIER_KEY).await
 }
 
 pub async fn insert_csrf_and_pkce(

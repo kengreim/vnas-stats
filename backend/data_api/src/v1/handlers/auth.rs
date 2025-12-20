@@ -46,7 +46,7 @@ pub async fn callback(
     Query(params): Query<AuthCallbackParams>,
 ) -> Result<impl IntoResponse, ApiError> {
     // Verify CSRF
-    let stored_csrf = session::get_csrf_token(&session).await?;
+    let stored_csrf = session::remove_csrf_token(&session).await?;
 
     if stored_csrf.is_none() {
         return Err(ApiError::MissingCsrfToken);
@@ -56,7 +56,7 @@ pub async fn callback(
         return Err(ApiError::InvalidCsrfToken(params.state));
     }
 
-    let pkce_verifier = session::get_pkce_verifier(&session)
+    let pkce_verifier = session::remove_pkce_verifier(&session)
         .await?
         .ok_or(ApiError::MissingPkceVerifier)?;
 
