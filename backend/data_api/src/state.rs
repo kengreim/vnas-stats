@@ -26,8 +26,7 @@ pub type OauthClient = Client<
 #[derive(Clone, FromRef)]
 pub struct AppState {
     pub db: Db,
-    pub oauth_client: Arc<OauthClient>,
-    pub oauth_env: OauthEnvironment,
+    pub oauth: Oauth,
     pub http_clients: HttpClients,
 }
 
@@ -40,6 +39,13 @@ pub struct Db {
 pub struct HttpClients {
     pub standard: reqwest::Client,
     pub no_redirect: reqwest::Client,
+}
+
+#[derive(Clone)]
+pub struct Oauth {
+    pub client: Arc<OauthClient>,
+    pub environment: OauthEnvironment,
+    pub frontend_login_success_url: String,
 }
 
 //

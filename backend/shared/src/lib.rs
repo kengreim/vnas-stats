@@ -57,6 +57,7 @@ pub struct OAuthConfig {
     pub client_secret: String,
     pub redirect_url: String,
     pub environment: OauthEnvironment,
+    pub frontend_login_success_url: String,
 }
 
 pub fn load_config() -> Result<Config, ConfigError> {

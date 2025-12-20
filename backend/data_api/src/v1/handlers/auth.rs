@@ -1,4 +1,4 @@
-use crate::state::{HttpClients, OauthClient};
+use crate::state::{HttpClients, Oauth};
 use crate::v1::error::ApiError;
 use crate::v1::session;
 use crate::v1::session::AuthUser;
@@ -11,17 +11,16 @@ use axum::{
 use oauth2::{AuthorizationCode, CsrfToken, PkceCodeChallenge, Scope, TokenResponse};
 use serde::Deserialize;
 use shared::vatsim;
-use shared::vatsim::OauthEnvironment;
-use std::sync::Arc;
 use tower_sessions::Session;
 
 pub async fn login(
-    State(oauth_client): State<Arc<OauthClient>>,
+    State(oauth): State<Oauth>,
     session: Session,
 ) -> Result<impl IntoResponse, ApiError> {
     let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
 
-    let (auth_url, csrf_token) = oauth_client
+    let (auth_url, csrf_token) = oauth
+        .client
         .authorize_url(CsrfToken::new_random)
         .add_scope(Scope::new(vatsim::Scope::VatsimDetails.to_string()))
         .set_pkce_challenge(pkce_challenge)
@@ -39,8 +38,7 @@ pub struct AuthCallbackParams {
 }
 
 pub async fn callback(
-    State(oauth_client): State<Arc<OauthClient>>,
-    State(oauth_env): State<OauthEnvironment>,
+    State(oauth): State<Oauth>,
     State(http_clients): State<HttpClients>,
     session: Session,
     Query(params): Query<AuthCallbackParams>,
@@ -61,7 +59,8 @@ pub async fn callback(
         .ok_or(ApiError::MissingPkceVerifier)?;
 
     // Exchange code
-    let token_result = oauth_client
+    let token_result = oauth
+        .client
         .exchange_code(AuthorizationCode::new(params.code))
         .set_pkce_verifier(pkce_verifier)
         .request_async(&http_clients.no_redirect)
@@ -70,7 +69,7 @@ pub async fn callback(
     // Fetch VATSIM user details
     let user_data = vatsim::fetch_user_details(
         &http_clients.standard,
-        oauth_env,
+        oauth.environment,
         token_result.access_token().secret(),
     )
     .await?;
@@ -82,12 +81,12 @@ pub async fn callback(
     session::insert_user(&session, AuthUser { cid }).await?;
 
     // Redirect to frontend root
-    Ok(Redirect::to("/"))
+    Ok(Redirect::to(&oauth.frontend_login_success_url))
 }
 
 pub async fn logout(session: Session) -> Result<impl IntoResponse, ApiError> {
     session.delete().await?;
-    Ok(Redirect::to("/"))
+    Ok(())
 }
 
 pub async fn me(session: Session) -> Result<impl IntoResponse, ApiError> {

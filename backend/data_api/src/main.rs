@@ -1,7 +1,7 @@
 mod state;
 mod v1;
 
-use crate::state::{Db, HttpClients};
+use crate::state::{Db, HttpClients, Oauth};
 use anyhow::anyhow;
 use axum::http::StatusCode;
 use axum::{Router, routing::get};
@@ -55,13 +55,11 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let endpoints = OauthEndpoints::from(oauth_config.environment);
 
-    let oauth_client = Arc::new(
-        BasicClient::new(ClientId::new(oauth_config.client_id.to_string()))
-            .set_client_secret(ClientSecret::new(oauth_config.client_secret))
-            .set_auth_uri(AuthUrl::new(endpoints.auth_url)?)
-            .set_token_uri(TokenUrl::new(endpoints.token_url)?)
-            .set_redirect_uri(RedirectUrl::new(oauth_config.redirect_url)?),
-    );
+    let oauth_client = BasicClient::new(ClientId::new(oauth_config.client_id.to_string()))
+        .set_client_secret(ClientSecret::new(oauth_config.client_secret))
+        .set_auth_uri(AuthUrl::new(endpoints.auth_url)?)
+        .set_token_uri(TokenUrl::new(endpoints.token_url)?)
+        .set_redirect_uri(RedirectUrl::new(oauth_config.redirect_url)?);
 
     let standard_http_client = reqwest::ClientBuilder::new().build()?;
     let no_redirect_http_client = reqwest::ClientBuilder::new()
@@ -70,8 +68,11 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let state = state::AppState {
         db: Db { pool },
-        oauth_client,
-        oauth_env: oauth_config.environment,
+        oauth: Oauth {
+            client: Arc::new(oauth_client),
+            environment: oauth_config.environment,
+            frontend_login_success_url: oauth_config.frontend_login_success_url,
+        },
         http_clients: HttpClients {
             standard: standard_http_client,
             no_redirect: no_redirect_http_client,
