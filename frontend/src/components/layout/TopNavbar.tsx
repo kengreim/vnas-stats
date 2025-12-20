@@ -33,7 +33,7 @@ export const TopNavbar = () => {
 };
 
 const MobileNav = () => {
-  return <>div</>;
+  return <div></div>;
 };
 
 const LogoButton = () => {
