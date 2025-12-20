@@ -8,6 +8,7 @@ use axum::{Router, routing::get};
 use oauth2::{AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenUrl, basic::BasicClient};
 use shared::vatsim::OauthEndpoints;
 use shared::{init_tracing_and_oltp, initialize_db, load_config};
+use std::sync::Arc;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::{Any, CorsLayer};
 use tower_sessions::{ExpiredDeletion, Expiry, SessionManagerLayer};
@@ -54,11 +55,13 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let endpoints = OauthEndpoints::from(oauth_config.environment);
 
-    let oauth_client = BasicClient::new(ClientId::new(oauth_config.client_id.to_string()))
-        .set_client_secret(ClientSecret::new(oauth_config.client_secret))
-        .set_auth_uri(AuthUrl::new(endpoints.auth_url)?)
-        .set_token_uri(TokenUrl::new(endpoints.token_url)?)
-        .set_redirect_uri(RedirectUrl::new(oauth_config.redirect_url)?);
+    let oauth_client = Arc::new(
+        BasicClient::new(ClientId::new(oauth_config.client_id.to_string()))
+            .set_client_secret(ClientSecret::new(oauth_config.client_secret))
+            .set_auth_uri(AuthUrl::new(endpoints.auth_url)?)
+            .set_token_uri(TokenUrl::new(endpoints.token_url)?)
+            .set_redirect_uri(RedirectUrl::new(oauth_config.redirect_url)?),
+    );
 
     let standard_http_client = reqwest::ClientBuilder::new().build()?;
     let no_redirect_http_client = reqwest::ClientBuilder::new()

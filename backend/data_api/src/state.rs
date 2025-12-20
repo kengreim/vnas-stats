@@ -8,6 +8,7 @@ use oauth2::{
 };
 use shared::vatsim::OauthEnvironment;
 use sqlx::{Pool, Postgres};
+use std::sync::Arc;
 
 pub type OauthClient = Client<
     BasicErrorResponse,
@@ -25,7 +26,7 @@ pub type OauthClient = Client<
 #[derive(Clone, FromRef)]
 pub struct AppState {
     pub db: Db,
-    pub oauth_client: OauthClient,
+    pub oauth_client: Arc<OauthClient>,
     pub oauth_env: OauthEnvironment,
     pub http_clients: HttpClients,
 }

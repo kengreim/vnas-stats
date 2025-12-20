@@ -12,16 +12,11 @@ use oauth2::{AuthorizationCode, CsrfToken, PkceCodeChallenge, Scope, TokenRespon
 use serde::Deserialize;
 use shared::vatsim;
 use shared::vatsim::OauthEnvironment;
+use std::sync::Arc;
 use tower_sessions::Session;
 
-#[derive(Deserialize)]
-pub struct AuthCallbackParams {
-    code: String,
-    state: String,
-}
-
 pub async fn login(
-    State(oauth_client): State<OauthClient>,
+    State(oauth_client): State<Arc<OauthClient>>,
     session: Session,
 ) -> Result<impl IntoResponse, ApiError> {
     let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
@@ -37,8 +32,14 @@ pub async fn login(
     Ok(Redirect::to(auth_url.as_str()))
 }
 
+#[derive(Deserialize)]
+pub struct AuthCallbackParams {
+    code: String,
+    state: String,
+}
+
 pub async fn callback(
-    State(oauth_client): State<OauthClient>,
+    State(oauth_client): State<Arc<OauthClient>>,
     State(oauth_env): State<OauthEnvironment>,
     State(http_clients): State<HttpClients>,
     session: Session,
