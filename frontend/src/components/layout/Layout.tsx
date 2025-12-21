@@ -1,6 +1,7 @@
 // import { AppSidebar } from "~/components/layout/AppSidebar";
 // import { SidebarProvider, SidebarTrigger } from "~/components/ui/Sidebar";
 import { ParentProps } from "solid-js";
+import { Footer } from "~/components/layout/Footer.tsx";
 import { TopNavbar } from "~/components/layout/TopNavbar.tsx";
 
 export function Layout(props: ParentProps) {
@@ -12,9 +13,10 @@ export function Layout(props: ParentProps) {
     //     {props.children}
     //   </main>
     // </SidebarProvider>
-    <main>
+    <div class="flex min-h-screen flex-col">
       <TopNavbar />
-      {props.children}
-    </main>
+      <div class="flex-1">{props.children}</div>
+      <Footer />
+    </div>
   );
 }
