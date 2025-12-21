@@ -16,7 +16,7 @@ export const TopNavbar = () => {
   const isSmall = createMediaQuery("(max-width: 767px)");
 
   return (
-    <header class="sticky top-0 z-50 w-full border-b bg-background px-4 backdrop-blur **:no-underline md:px-6">
+    <header class="fixed inset-x-0 top-0 z-50 w-full border-b bg-secondary px-4 backdrop-blur **:no-underline md:px-6">
       <div class="container mx-auto flex h-16 max-w-screen-2xl items-center justify-between gap-4">
         <Show when={isSmall()}>
           <MobileNav />
@@ -49,11 +49,11 @@ const LogoButton = () => {
 const FullNav = () => {
   return (
     <NavigationMenu>
-      <NavigationMenuItem>
-        <NavigationMenuTrigger>
-          <Link to="/privacy">Privacy</Link>
-        </NavigationMenuTrigger>
-      </NavigationMenuItem>
+      {/*<NavigationMenuItem>*/}
+      {/*  <NavigationMenuTrigger>*/}
+      {/*    <Link to="/privacy">Privacy</Link>*/}
+      {/*  </NavigationMenuTrigger>*/}
+      {/*</NavigationMenuItem>*/}
       {/*<NavigationMenuTrigger as="a" href="https://github.com/kobaltedev/kobalte" target="_blank">*/}
       {/*  GitHub*/}
       {/*</NavigationMenuTrigger>*/}

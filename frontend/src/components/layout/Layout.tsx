@@ -13,10 +13,12 @@ export function Layout(props: ParentProps) {
     //     {props.children}
     //   </main>
     // </SidebarProvider>
-    <div class="flex min-h-screen flex-col">
+    <>
       <TopNavbar />
-      <div class="flex-1">{props.children}</div>
-      <Footer />
-    </div>
+      <div class="min-h-dvh pt-16.25">
+        <main>{props.children}</main>
+        <Footer />
+      </div>
+    </>
   );
 }
