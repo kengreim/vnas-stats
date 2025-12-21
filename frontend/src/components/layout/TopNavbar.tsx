@@ -11,12 +11,14 @@ import {
   NavigationMenuTrigger,
 } from "~/components/ui/NavigationMenu";
 import { Link } from "@tanstack/solid-router";
+import { DiscordIcon } from "~/components/icons/DiscordIcon.tsx";
+import { GithubIcon } from "~/components/icons/GithubIcon.tsx";
 
 export const TopNavbar = () => {
   const isSmall = createMediaQuery("(max-width: 767px)");
 
   return (
-    <header class="fixed inset-x-0 top-0 z-50 w-full border-b bg-secondary px-4 backdrop-blur **:no-underline md:px-6">
+    <header class="fixed inset-x-0 top-0 z-50 w-full border-b bg-secondary px-4 backdrop-blur **:no-underline md:px-12">
       <div class="container mx-auto flex h-16 max-w-screen-2xl items-center justify-between gap-4">
         <Show when={isSmall()}>
           <MobileNav />
@@ -48,25 +50,54 @@ const LogoButton = () => {
 
 const FullNav = () => {
   return (
-    <NavigationMenu>
-      {/*<NavigationMenuItem>*/}
-      {/*  <NavigationMenuTrigger>*/}
-      {/*    <Link to="/privacy">Privacy</Link>*/}
-      {/*  </NavigationMenuTrigger>*/}
-      {/*</NavigationMenuItem>*/}
-      {/*<NavigationMenuTrigger as="a" href="https://github.com/kobaltedev/kobalte" target="_blank">*/}
-      {/*  GitHub*/}
-      {/*</NavigationMenuTrigger>*/}
-      {/*<NavigationMenuTrigger as="a" href="https://github.com/kobaltedev/kobalte" target="_blank">*/}
-      {/*  GitHub*/}
-      {/*</NavigationMenuTrigger>*/}
-      {/*<NavigationMenuTrigger as="a" href="https://github.com/kobaltedev/kobalte" target="_blank">*/}
-      {/*  GitHub*/}
-      {/*</NavigationMenuTrigger>*/}
-      {/*<NavigationMenuTrigger as="a" href="https://github.com/kobaltedev/kobalte" target="_blank">*/}
-      {/*  GitHub*/}
-      {/*</NavigationMenuTrigger>*/}
-    </NavigationMenu>
+    <>
+      <NavigationMenu>
+        {/*<NavigationMenuItem>*/}
+        {/*  <NavigationMenuTrigger>*/}
+        {/*    <Link to="/privacy">Privacy</Link>*/}
+        {/*  </NavigationMenuTrigger>*/}
+        {/*</NavigationMenuItem>*/}
+        {/*<NavigationMenuTrigger as="a" href="https://github.com/kobaltedev/kobalte" target="_blank">*/}
+        {/*  GitHub*/}
+        {/*</NavigationMenuTrigger>*/}
+        {/*<NavigationMenuTrigger as="a" href="https://github.com/kobaltedev/kobalte" target="_blank">*/}
+        {/*  GitHub*/}
+        {/*</NavigationMenuTrigger>*/}
+        {/*<NavigationMenuTrigger as="a" href="https://github.com/kobaltedev/kobalte" target="_blank">*/}
+        {/*  GitHub*/}
+        {/*</NavigationMenuTrigger>*/}
+        {/*<NavigationMenuTrigger as="a" href="https://github.com/kobaltedev/kobalte" target="_blank">*/}
+        {/*  GitHub*/}
+        {/*</NavigationMenuTrigger>*/}
+      </NavigationMenu>
+      <div class="flex items-center gap-3">
+        <a
+          href=""
+          target="_blank"
+          rel="noreferrer"
+          aria-label="Join the community on Discord"
+          class="text-foreground transition hover:text-primary"
+        >
+          <DiscordIcon class="h-6 w-6 fill-primary/50 transition-colors hover:fill-primary" />
+        </a>
+        <a
+          href="https://github.com/kengreim/vnas-stats"
+          target="_blank"
+          rel="noreferrer"
+          aria-label="View the project on GitHub"
+          class="text-foreground transition hover:text-primary"
+        >
+          <GithubIcon class="h-6 w-6 fill-primary/50 transition-colors hover:fill-primary" />
+        </a>
+        <a href="https://vnas.vatsim.net" target="_blank" rel="noreferrer">
+          <img
+            src="https://www.vnas.vatsim.net/assets/logo-B1Wm_pt2.png"
+            class="h-6 w-6 opacity-50 transition-opacity hover:opacity-100"
+            alt="vNAS logo"
+          />
+        </a>
+      </div>
+    </>
   );
 };
 

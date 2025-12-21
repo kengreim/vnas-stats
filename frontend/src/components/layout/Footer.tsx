@@ -34,7 +34,13 @@ export const Footer = () => {
           >
             <GithubIcon class="fill-primary/50 transition-colors hover:fill-primary" />
           </a>
-          <span class="text-xs tracking-[0.2em] uppercase">vNAS</span>
+          <a href="https://vnas.vatsim.net">
+            <img
+              src="https://www.vnas.vatsim.net/assets/logo-B1Wm_pt2.png"
+              class="w-5 opacity-50 transition-opacity hover:opacity-100"
+              alt="vNAS logo"
+            />
+          </a>
         </div>
       </div>
     </footer>

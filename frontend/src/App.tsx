@@ -161,7 +161,7 @@ export default function App() {
                     <CardTitle>{CATEGORY_LABELS[key]}</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <Table class="text-md table-auto font-mono">
+                    <Table class="table-auto font-mono text-sm">
                       <TableHeader>
                         <TableRow>
                           <TableHead>#</TableHead>
@@ -170,7 +170,7 @@ export default function App() {
                           <TableHead class="text-right">Uptime %</TableHead>
                         </TableRow>
                       </TableHeader>
-                      <TableBody>
+                      <TableBody class="text-xs 2xl:text-sm">
                         <For each={store[key]}>
                           {(item, index) => (
                             <TableRow>
