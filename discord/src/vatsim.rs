@@ -1,11 +1,11 @@
 use chrono::{DateTime, Utc};
 use reqwest::Client;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 const API_BASE: &str = "https://api.vatsim.net/v2";
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct VatsimUserData {
     pub id: i32,
     pub rating: i8,

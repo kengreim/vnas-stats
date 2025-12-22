@@ -1,9 +1,10 @@
 use anyhow::{anyhow, Context};
 use poise::{self, serenity_prelude as serenity};
-use serenity::{GatewayIntents, GuildId, RoleId, UserId};
+use serenity::GatewayIntents;
 use sqlx::PgPool;
 use crate::commands::sync_my_roles;
 use crate::event_handler::handle_event;
+use crate::jobs::spawn_periodic_sync;
 use crate::config::Config;
 use crate::vatsim::VatsimClient;
 use crate::vatusa::VatusaClient;
@@ -15,6 +16,8 @@ mod event_handler;
 mod commands;
 mod roles;
 mod db;
+mod audit;
+mod jobs;
 
 type Error = anyhow::Error;
 type PoiseContext<'a> = poise::Context<'a, AppState, Error>;
@@ -64,6 +67,7 @@ async fn main() -> anyhow::Result<()> {
             let state = state.clone();
             Box::pin(async move {
                 println!("bot connected, listening for new members in guild {}", cfg.guild_id);
+                spawn_periodic_sync(state.clone(), ctx.clone());
                 Ok(state)
             })
         }).build();
