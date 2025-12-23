@@ -1,4 +1,4 @@
-name = "vnas-stats-datafeed-backup"
+name = "vnas-stats-backup-fetcher"
 compatibility_date = "2025-12-23"
 main = "./build/worker/shim.mjs"
 
