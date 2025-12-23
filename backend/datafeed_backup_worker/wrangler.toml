@@ -3,7 +3,7 @@ compatibility_date = "2025-12-23"
 main = "./build/worker/shim.mjs"
 
 [build]
-command = "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && source $HOME/.cargo/env && cargo install worker-build && worker-build --release"
+command = "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && . $HOME/.cargo/env && cargo install worker-build && worker-build --release"
 
 [[r2_buckets]]
 binding = "bucket"
