@@ -1,2 +1,4 @@
 target
 .env
+/datafeed_backup_worker/.wrangler/
+/datafeed_backup_worker/node_modules/

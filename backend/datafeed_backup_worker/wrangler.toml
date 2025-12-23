@@ -1,0 +1,11 @@
+name = "vnas-stats-datafeed-backup"
+compatibility_date = "2025-12-23"
+main = "./build/worker/shim.mjs"
+
+[build]
+command = "cargo install worker-build@^0.7 && worker-build --release"
+
+[[r2_buckets]]
+binding = "bucket"
+bucket_name = "vnas-stats-backup"
+preview_bucket_name = "vnas-stats-backup-preview"
