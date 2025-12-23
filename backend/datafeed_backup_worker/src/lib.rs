@@ -1,5 +1,10 @@
 use js_sys::Date as JsDate;
-use worker::{console_error, event, Env, Fetch, Method, Request, Response, Result, ScheduleContext, ScheduledEvent};
+use worker::{
+    Env, Fetch, Method, Request, Response, Result, ScheduleContext, ScheduledEvent, console_error,
+    console_log, event,
+};
+
+const DATAFEED_URL: &str = "https://live.env.vnas.vatsim.net/data-feed/controllers.json";
 
 /// Health endpoint.
 #[event(fetch)]
@@ -16,13 +21,14 @@ pub async fn scheduled(_event: ScheduledEvent, env: Env, _ctx: ScheduleContext) 
 }
 
 async fn run_backup(env: &Env) -> Result<()> {
-    let url = "https://live.env.vnas.vatsim.net/data-feed/controllers.json";
     let bucket = env.bucket("bucket")?;
-    let req = Request::new(url, Method::Get)?;
+    let req = Request::new(DATAFEED_URL, Method::Get)?;
     let mut resp = Fetch::Request(req).send().await?;
     let bytes = resp.bytes().await?;
+    console_log!("successfully fetched datafeed");
     let ts_ms = JsDate::now() as u64;
     let object_key = format!("datafeed-{ts_ms}.json");
+    console_log!("uploading to bucket as {object_key}");
 
     bucket.put(object_key, bytes).execute().await?;
 
