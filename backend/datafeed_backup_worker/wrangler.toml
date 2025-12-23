@@ -9,3 +9,6 @@ command = "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- 
 binding = "bucket"
 bucket_name = "vnas-stats-backup"
 preview_bucket_name = "vnas-stats-backup-preview"
+
+[triggers]
+crons = ["* * * * *"]
