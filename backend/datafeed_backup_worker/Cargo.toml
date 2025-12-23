@@ -1,0 +1,11 @@
+[package]
+name = "datafeed_backup_worker"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+js-sys = "0.3.83"
+worker = { version = "0.7.2", features = ["http"] }
