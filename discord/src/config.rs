@@ -1,5 +1,5 @@
-use figment::providers::{Env, Serialized};
 use figment::Figment;
+use figment::providers::{Env, Serialized};
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct Config {
@@ -9,7 +9,7 @@ pub struct Config {
     pub fallback_role_id: u64,
     pub audit_channel_id: u64,
     pub database_url: String,
-    pub vatusa_first: bool,
+    pub health_addr: String,
 }
 
 impl Config {
@@ -22,7 +22,7 @@ impl Config {
                 fallback_role_id: 0,
                 audit_channel_id: 0,
                 database_url: "postgres://user:pass@localhost:5432/discord".to_string(),
-                vatusa_first: true,
+                health_addr: "0.0.0.0:8081".to_string(),
             }))
             .merge(Env::prefixed("DISCORD__").split("__"))
             .extract()
