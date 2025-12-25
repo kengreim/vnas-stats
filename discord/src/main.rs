@@ -1,3 +1,5 @@
+#![warn(clippy::pedantic)]
+
 use crate::api_clients::{VatsimClient, VatusaClient};
 use crate::commands::sync_my_roles;
 use crate::config::Config;
@@ -68,7 +70,7 @@ async fn main() -> anyhow::Result<()> {
         .options(poise::FrameworkOptions {
             commands: vec![sync_my_roles(), commands::sync_roles()],
             event_handler: |ctx, event, _framework, data| {
-                Box::pin(async move { handle_event(ctx, &event, data).await.map_err(|e| e.into()) })
+                Box::pin(async move { handle_event(ctx, event, data).await.map_err(Into::into) })
             },
             ..Default::default()
         })

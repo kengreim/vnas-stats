@@ -1,7 +1,7 @@
 use poise::serenity_prelude as serenity;
 use serenity::builder::CreateMessage;
 
-/// Send a message to the configured audit channel. No-op if channel_id is 0.
+/// Send a message to the configured audit channel. No-op if `channel_id` is 0.
 pub async fn send_audit_message(
     ctx: &serenity::Context,
     channel_id: u64,

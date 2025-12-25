@@ -1,13 +1,12 @@
 use std::time::Duration;
 
 use poise::serenity_prelude as serenity;
-use rand::{Rng, thread_rng};
+use rand::{Rng, rng};
 
 use crate::AppState;
 use crate::audit::send_audit_message;
 use crate::roles::sync_and_assign;
 use serenity::builder::CreateMessage;
-use serenity::model::id::RoleId;
 
 /// Spawn a background task to periodically sync all members in the guild.
 pub fn spawn_periodic_sync(state: AppState, ctx: serenity::Context) {
@@ -44,7 +43,7 @@ async fn sync_all_members(state: &AppState, ctx: &serenity::Context) -> anyhow::
             match sync_and_assign(state, ctx, guild_id, member.user.id).await {
                 Ok(result) => {
                     if result.role_changed {
-                        changes.push((member.user.id, result.role_id));
+                        changes.push((member.user.id, result.role_id, result.role_name));
                     }
                 }
                 Err(err) => {
@@ -53,21 +52,16 @@ async fn sync_all_members(state: &AppState, ctx: &serenity::Context) -> anyhow::
             }
 
             // Small jitter between requests to avoid hammering upstream APIs.
-            let jitter_ms = thread_rng().gen_range(1000..=2000);
+            let jitter_ms = rng().random_range(1000..=2000);
             tokio::time::sleep(Duration::from_millis(jitter_ms)).await;
         }
     }
 
     if state.cfg.audit_channel_id != 0 && !changes.is_empty() {
-        let verified_role_id = RoleId::new(state.cfg.verified_role_id);
         let mut lines = Vec::with_capacity(changes.len());
-        for (user_id, role_id) in changes {
-            let role_label = if role_id == verified_role_id {
-                "verified role"
-            } else {
-                "fallback role"
-            };
-            lines.push(format!("<@{}> → {}", user_id, role_label));
+        for (user_id, role_id, role_name) in changes {
+            let role_label = role_name.unwrap_or_else(|| role_id.to_string());
+            lines.push(format!("<@{user_id}> → {role_label}"));
         }
 
         let mut message = String::from("Bulk role sync changes:\n");

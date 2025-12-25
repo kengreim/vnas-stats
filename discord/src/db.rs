@@ -38,7 +38,7 @@ pub async fn persist_member(
             synced_at = NOW()
         ",
     )
-    .bind(discord_id as i64)
+    .bind(discord_id.cast_signed())
     .bind(data.cid)
     .bind(vatusa_json.as_ref())
     .bind(vatsim_json.as_ref())
