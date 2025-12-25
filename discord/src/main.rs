@@ -10,6 +10,7 @@ use anyhow::Context;
 use poise::{self, serenity_prelude as serenity};
 use serenity::GatewayIntents;
 use sqlx::PgPool;
+use std::sync::OnceLock;
 
 mod api_clients;
 mod audit;
@@ -23,6 +24,8 @@ mod roles;
 
 type Error = anyhow::Error;
 type PoiseContext<'a> = poise::Context<'a, AppState, Error>;
+
+static PERIODIC_SYNC_STARTED: OnceLock<()> = OnceLock::new();
 
 #[derive(Clone)]
 pub struct AppState {
@@ -89,11 +92,13 @@ async fn main() -> anyhow::Result<()> {
                         &framework.options().commands,
                         guild_id.into(),
                     )
-                        .await?;
+                    .await?;
                 } else {
                     poise::builtins::register_globally(ctx, &framework.options().commands).await?;
                 }
-                spawn_periodic_sync(state.clone(), ctx.clone());
+                if PERIODIC_SYNC_STARTED.set(()).is_ok() {
+                    spawn_periodic_sync(state.clone(), ctx.clone());
+                }
                 Ok(state)
             })
         })
