@@ -21,7 +21,9 @@ pub async fn handle_event(
                             "New member joined: <@{}> → {}",
                             new_member.user.id, role_label
                         ));
-                        if let Err(e) = send_audit_message(ctx, data.cfg.audit_channel_id, msg).await {
+                        if let Err(e) =
+                            send_audit_message(ctx, data.cfg.audit_channel_id, msg).await
+                        {
                             eprintln!("Error sending audit message: {e:?}");
                         }
                     }

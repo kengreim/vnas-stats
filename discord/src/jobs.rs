@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use poise::serenity_prelude as serenity;
 use rand::{Rng, rng};
@@ -28,6 +28,12 @@ async fn sync_all_members(state: &AppState, ctx: &serenity::Context) -> anyhow::
     let guild_id = serenity::GuildId::new(state.cfg.guild_id);
     let mut after = None;
     let mut changes = Vec::new();
+    let started = Instant::now();
+
+    if state.cfg.audit_channel_id != 0 {
+        let msg = CreateMessage::new().content("Bulk role sync started");
+        let _ = send_audit_message(ctx, state.cfg.audit_channel_id, msg).await;
+    }
 
     loop {
         let members = guild_id.members(&ctx.http, Some(1000), after).await?;
@@ -57,8 +63,10 @@ async fn sync_all_members(state: &AppState, ctx: &serenity::Context) -> anyhow::
         }
     }
 
+    let num_changes = changes.len();
     if state.cfg.audit_channel_id != 0 && !changes.is_empty() {
         let mut lines = Vec::with_capacity(changes.len());
+
         for (user_id, role_id, role_name) in changes {
             let role_label = role_name.unwrap_or_else(|| role_id.to_string());
             lines.push(format!("<@{user_id}> → {role_label}"));
@@ -79,6 +87,19 @@ async fn sync_all_members(state: &AppState, ctx: &serenity::Context) -> anyhow::
             let msg = CreateMessage::new().content(message);
             let _ = send_audit_message(ctx, state.cfg.audit_channel_id, msg).await;
         }
+    }
+
+    if state.cfg.audit_channel_id != 0 {
+        let duration_ms = started.elapsed().as_millis();
+        let msg = CreateMessage::new().content(format!(
+            "Bulk role sync complete in {duration_ms} ms ({num_changes} {})",
+            if num_changes == 1 {
+                "change"
+            } else {
+                "changes"
+            },
+        ));
+        let _ = send_audit_message(ctx, state.cfg.audit_channel_id, msg).await;
     }
 
     Ok(())

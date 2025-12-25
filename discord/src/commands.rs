@@ -53,7 +53,10 @@ pub async fn sync_my_roles(ctx: PoiseContext<'_>) -> Result<(), Error> {
     rename = "syncroles",
     required_permissions = "MANAGE_ROLES"
 )]
-pub async fn sync_roles(ctx: PoiseContext<'_>, user: User) -> Result<(), Error> {
+pub async fn sync_roles(
+    ctx: PoiseContext<'_>,
+    #[description = "user whose roles will be synced"] user: User,
+) -> Result<(), Error> {
     let guild_id = ctx
         .guild_id()
         .ok_or_else(|| anyhow!("This command can only be used in a server"))?;
@@ -92,8 +95,7 @@ pub async fn sync_roles(ctx: PoiseContext<'_>, user: User) -> Result<(), Error> 
     pending
         .edit(
             ctx,
-            poise::CreateReply::default()
-                .content(format!("Role sync complete for <@{}>", user.id)),
+            poise::CreateReply::default().content(format!("Role sync complete for <@{}>", user.id)),
         )
         .await?;
     Ok(())
