@@ -8,6 +8,7 @@ pub struct Config {
     pub verified_role_id: u64,
     pub fallback_role_id: u64,
     pub audit_channel_id: u64,
+    pub command_guild_id: Option<u64>,
     pub database_url: String,
     pub health_addr: String,
 }
@@ -21,6 +22,7 @@ impl Config {
                 verified_role_id: 0,
                 fallback_role_id: 0,
                 audit_channel_id: 0,
+                command_guild_id: None,
                 database_url: "postgres://user:pass@localhost:5432/discord".to_string(),
                 health_addr: "0.0.0.0:8081".to_string(),
             }))

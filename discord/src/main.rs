@@ -74,7 +74,7 @@ async fn main() -> anyhow::Result<()> {
             },
             ..Default::default()
         })
-        .setup(move |ctx, _ready, _framework| {
+        .setup(move |ctx, _ready, framework| {
             let state = state.clone();
             Box::pin(async move {
                 state.health.set_cache(ctx.cache.clone()).await;
@@ -82,6 +82,17 @@ async fn main() -> anyhow::Result<()> {
                     "bot connected, listening for new members in guild {}",
                     cfg.guild_id
                 );
+                // Register commands (guild-scoped if configured, otherwise global).
+                if let Some(guild_id) = state.cfg.command_guild_id {
+                    poise::builtins::register_in_guild(
+                        ctx,
+                        &framework.options().commands,
+                        guild_id.into(),
+                    )
+                        .await?;
+                } else {
+                    poise::builtins::register_globally(ctx, &framework.options().commands).await?;
+                }
                 spawn_periodic_sync(state.clone(), ctx.clone());
                 Ok(state)
             })
