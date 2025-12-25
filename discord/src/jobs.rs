@@ -46,6 +46,9 @@ async fn sync_all_members(state: &AppState, ctx: &serenity::Context) -> anyhow::
         after = members.last().map(|m| m.user.id);
 
         for member in members {
+            if member.user.bot {
+                continue;
+            }
             match sync_and_assign(state, ctx, guild_id, member.user.id).await {
                 Ok(result) => {
                     if result.role_changed {
