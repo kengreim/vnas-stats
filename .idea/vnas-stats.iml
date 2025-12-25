@@ -10,7 +10,6 @@
       <sourceFolder url="file://$MODULE_DIR$/backend/shared/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/backend/shared/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/backend/datafeed_backup_worker/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/backend/discord/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/discord/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
       <excludeFolder url="file://$MODULE_DIR$/backend/datafeed_fetcher/target" />

@@ -1,3 +1,5 @@
+#![warn(clippy::pedantic)]
+
 use crate::api_clients::{VatsimClient, VatusaClient};
 use crate::commands::sync_my_roles;
 use crate::config::Config;
@@ -68,11 +70,11 @@ async fn main() -> anyhow::Result<()> {
         .options(poise::FrameworkOptions {
             commands: vec![sync_my_roles(), commands::sync_roles()],
             event_handler: |ctx, event, _framework, data| {
-                Box::pin(async move { handle_event(ctx, &event, data).await.map_err(|e| e.into()) })
+                Box::pin(async move { handle_event(ctx, event, data).await.map_err(Into::into) })
             },
             ..Default::default()
         })
-        .setup(move |ctx, _ready, _framework| {
+        .setup(move |ctx, _ready, framework| {
             let state = state.clone();
             Box::pin(async move {
                 state.health.set_cache(ctx.cache.clone()).await;
@@ -80,6 +82,17 @@ async fn main() -> anyhow::Result<()> {
                     "bot connected, listening for new members in guild {}",
                     cfg.guild_id
                 );
+                // Register commands (guild-scoped if configured, otherwise global).
+                if let Some(guild_id) = state.cfg.command_guild_id {
+                    poise::builtins::register_in_guild(
+                        ctx,
+                        &framework.options().commands,
+                        guild_id.into(),
+                    )
+                        .await?;
+                } else {
+                    poise::builtins::register_globally(ctx, &framework.options().commands).await?;
+                }
                 spawn_periodic_sync(state.clone(), ctx.clone());
                 Ok(state)
             })

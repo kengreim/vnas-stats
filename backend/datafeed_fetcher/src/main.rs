@@ -1,4 +1,4 @@
-#[warn(clippy::pedantic)]
+#![warn(clippy::pedantic)]
 mod error;
 
 use crate::error::{EnqueueError, FetchError, MainError};

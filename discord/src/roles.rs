@@ -14,6 +14,7 @@ pub struct LookupResult {
 #[derive(Debug, Clone)]
 pub struct SyncResult {
     pub role_id: RoleId,
+    pub role_name: Option<String>,
     pub role_changed: bool,
 }
 
@@ -41,15 +42,21 @@ pub async fn sync_and_assign(
         member.add_role(&ctx.http, role_id).await?;
     }
 
-    if let Ok(ref found) = lookup {
-        if let Some(nick) = build_nickname(found) {
-            let builder = serenity::builder::EditMember::new().nickname(nick.clone());
-            let _ = member.edit(&ctx.http, builder).await;
-        }
+    if let Ok(ref found) = lookup
+        && let Some(nick) = build_nickname(found)
+    {
+        let builder = serenity::builder::EditMember::new().nickname(nick.clone());
+        let _ = member.edit(&ctx.http, builder).await;
     }
+
+    let role_name = ctx
+        .cache
+        .guild(guild_id)
+        .and_then(|g| g.roles.get(&role_id).map(|r| r.name.clone()));
 
     Ok(SyncResult {
         role_id,
+        role_name,
         role_changed: !has_role,
     })
 }
@@ -63,12 +70,12 @@ async fn lookup_user(state: &AppState, discord_id: u64) -> anyhow::Result<Lookup
 
     if let Ok(res) = state.vatusa.get_user_from_discord_id(discord_id).await {
         lookup.cid = Some(res.cid);
-        lookup.vatusa_data = Some(res)
-    };
+        lookup.vatusa_data = Some(res);
+    }
 
     if let Ok(res) = state.vatsim.get_user_from_discord_id(discord_id).await {
         if lookup.cid.is_none() {
-            lookup.cid = Some(res.id)
+            lookup.cid = Some(res.id);
         }
         lookup.vatsim_data = Some(res);
     }
