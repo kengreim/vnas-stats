@@ -40,6 +40,7 @@ pub async fn serve_health(state: HealthState, addr: SocketAddr) -> anyhow::Resul
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
+    println!("starting axum server on {addr}");
     axum::serve(listener, app).await?;
     Ok(())
 }

@@ -24,7 +24,7 @@ impl Config {
                 audit_channel_id: 0,
                 command_guild_id: None,
                 database_url: "postgres://user:pass@localhost:5432/discord".to_string(),
-                health_addr: "0.0.0.0:8081".to_string(),
+                health_addr: "127.0.0.1:3000".to_string(),
             }))
             .merge(Env::prefixed("DISCORD__").split("__"))
             .extract()
