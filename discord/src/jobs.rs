@@ -16,10 +16,10 @@ pub fn spawn_periodic_sync(state: AppState, ctx: serenity::Context) {
         // Tick once so the first wait happens after an initial run.
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
+            interval.tick().await;
             if let Err(err) = sync_all_members(&state, &ctx).await {
                 eprintln!("periodic sync failed: {err:?}");
             }
-            interval.tick().await;
         }
     });
 }
