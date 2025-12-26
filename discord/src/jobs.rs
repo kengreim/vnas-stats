@@ -15,6 +15,7 @@ pub fn spawn_periodic_sync(state: AppState, ctx: serenity::Context) {
         let mut interval = tokio::time::interval(Duration::from_secs(12 * 60 * 60));
         // Tick once so the first wait happens after an initial run.
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        println!("starting periodic sync loop");
         loop {
             interval.tick().await;
             if let Err(err) = sync_all_members(&state, &ctx).await {
@@ -25,6 +26,7 @@ pub fn spawn_periodic_sync(state: AppState, ctx: serenity::Context) {
 }
 
 async fn sync_all_members(state: &AppState, ctx: &serenity::Context) -> anyhow::Result<()> {
+    println!("syncing all members");
     let guild_id = serenity::GuildId::new(state.cfg.guild_id);
     let mut after = None;
     let mut changes = Vec::new();
