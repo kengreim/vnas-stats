@@ -5,6 +5,7 @@ use anyhow::anyhow;
 use serenity::builder::CreateMessage;
 use serenity::model::user::User;
 
+/// Sync your roles based on your Discord account's links to VATSIM and VATUSA
 #[poise::command(slash_command, rename = "syncmyroles")]
 pub async fn sync_my_roles(ctx: PoiseContext<'_>) -> Result<(), Error> {
     let guild_id = ctx
@@ -48,6 +49,7 @@ pub async fn sync_my_roles(ctx: PoiseContext<'_>) -> Result<(), Error> {
     Ok(())
 }
 
+/// Admin-only command to sync roles for a User based on their account's links to VATSIM and VATUSA
 #[poise::command(
     slash_command,
     rename = "syncroles",
