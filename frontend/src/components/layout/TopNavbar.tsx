@@ -72,7 +72,7 @@ const FullNav = () => {
       </NavigationMenu>
       <div class="flex items-center gap-3">
         <a
-          href=""
+          href="https://discord.gg/NaFQePmdXg"
           target="_blank"
           rel="noreferrer"
           aria-label="Join the community on Discord"
