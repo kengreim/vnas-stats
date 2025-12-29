@@ -91,7 +91,7 @@ const FullNav = () => {
         </a>
         <a href="https://vnas.vatsim.net" target="_blank" rel="noreferrer">
           <img
-            src="https://www.vnas.vatsim.net/assets/logo-B1Wm_pt2.png"
+            src="/images/vnas_logo_512x512.png"
             class="h-6 w-6 opacity-50 transition-opacity hover:opacity-100"
             alt="vNAS logo"
           />

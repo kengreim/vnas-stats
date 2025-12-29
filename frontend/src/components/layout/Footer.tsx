@@ -36,7 +36,7 @@ export const Footer = () => {
           </a>
           <a href="https://vnas.vatsim.net">
             <img
-              src="https://www.vnas.vatsim.net/assets/logo-B1Wm_pt2.png"
+              src="/images/vnas_logo_512x512.png"
               class="w-5 opacity-50 transition-opacity hover:opacity-100"
               alt="vNAS logo"
             />
