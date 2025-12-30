@@ -15,7 +15,7 @@ export function Layout(props: ParentProps) {
     // </SidebarProvider>
     <>
       <TopNavbar />
-      <div class="min-h-dvh pt-16.25">
+      <div class="flex min-h-dvh flex-col justify-between pt-16.25">
         <main>{props.children}</main>
         <Footer />
       </div>

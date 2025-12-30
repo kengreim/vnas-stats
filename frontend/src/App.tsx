@@ -133,19 +133,23 @@ export default function App() {
   return (
     <Layout>
       <main class="flex-1 overflow-y-auto px-6 py-6">
-        <p class="text-xs tracking-[0.2em] text-muted-foreground uppercase">Iron Mic</p>
-        <h1 class="text-2xl font-semibold">Current Month</h1>
         <Show when={query.data}>
           {(data) => (
-            <p class="text-sm text-muted-foreground">
-              {formatDateUtc(data().start)} → {formatDateUtc(data().end)}
-              {countdown() != null && (
-                <>
-                  {" "}
-                  · Next update in <span class="font-semibold text-foreground">{countdown()}s</span>
-                </>
-              )}
-            </p>
+            <div class="mb-4">
+              <h1 class="text-2xl font-semibold">
+                Iron Mic: {dayjs.utc(data().start).format("MMMM YYYY")}
+              </h1>
+              <p class="text-sm text-muted-foreground">
+                {formatDateUtc(data().start)} → {formatDateUtc(data().end)}
+                {countdown() != null && (
+                  <>
+                    {" "}
+                    · Refreshing in{" "}
+                    <span class="font-semibold text-foreground">{countdown()}s</span>
+                  </>
+                )}
+              </p>
+            </div>
           )}
         </Show>
         <div class="flex flex-col gap-6">
