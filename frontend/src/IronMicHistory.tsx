@@ -1,5 +1,6 @@
-import { createEffect, createSignal, For, Show, onCleanup } from "solid-js";
+import { createEffect, createSignal, For, Show } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
+import { ironMicHistoryRoute } from "~/router.tsx";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 
@@ -43,15 +44,13 @@ type LeaderboardItem = {
   isActive: boolean | null;
 };
 
-export default function App() {
-  const REFETCH_INTERVAL = 60_000;
+export default function IronMicHistory() {
+  const params = ironMicHistoryRoute.useParams();
 
-  const monthStart = dayjs.utc().startOf("month");
-  const [start, setStart] = createSignal(monthStart.toISOString());
-  const [end, setEnd] = createSignal(monthStart.add(1, "month").toISOString());
+  const monthStart = () => dayjs.utc(`${params().year}-${params().month}-01`);
+  const [start] = createSignal(monthStart().toISOString());
+  const [end] = createSignal(monthStart().add(1, "month").toISOString());
 
-  const [nextRefreshAt, setNextRefreshAt] = createSignal<number | null>(null);
-  const [countdown, setCountdown] = createSignal<number | null>(null);
   const [store, setStore] = createStore<Record<CategoryKey, LeaderboardItem[]>>({
     ground: [],
     tower: [],
@@ -59,42 +58,7 @@ export default function App() {
     center: [],
   });
 
-  const query = useIronMicStatsQuery(start, end, { refetchInterval: REFETCH_INTERVAL });
-
-  createEffect(() => {
-    if (query.dataUpdatedAt) {
-      setNextRefreshAt(query.dataUpdatedAt + REFETCH_INTERVAL);
-    }
-  });
-
-  createEffect(() => {
-    const id = setInterval(() => {
-      const monthStart = dayjs.utc().startOf("month");
-      const new_start = monthStart.toISOString();
-      if (new_start != start()) {
-        setStart(new_start);
-        setEnd(monthStart.add(1, "month").toISOString());
-      }
-    }, 60_000);
-
-    onCleanup(() => clearInterval(id));
-  });
-
-  createEffect(() => {
-    const target = nextRefreshAt();
-    if (!target) {
-      setCountdown(null);
-      return;
-    }
-    const update = () => {
-      const diff = target - Date.now();
-      setCountdown(Math.max(0, Math.ceil(diff / 1000)));
-    };
-    update();
-    const id = setInterval(update, 1000);
-
-    onCleanup(() => clearInterval(id));
-  });
+  const query = useIronMicStatsQuery(start, end, { refetchInterval: false });
 
   createEffect(() => {
     const data = query.data;
@@ -141,19 +105,11 @@ export default function App() {
               </h1>
               <p class="text-sm text-muted-foreground">
                 {formatDateUtc(data().start)} → {formatDateUtc(data().end)}
-                {countdown() != null && (
-                  <>
-                    {" "}
-                    · Refreshing in{" "}
-                    <span class="font-semibold text-foreground">{countdown()}s</span>
-                  </>
-                )}
               </p>
             </div>
           )}
         </Show>
         <div class="flex flex-col gap-6">
-          {/*<ActivityChart start={start()} end={end()} />*/}
           <Show when={query.error}>
             {(err) => <p class="text-destructive">Error: {(err() as Error).message}</p>}
           </Show>
@@ -182,9 +138,7 @@ export default function App() {
                               <TableCell class="py-1">
                                 <div
                                   class={cn("w-fit rounded-md px-2 py-1", {
-                                    "bg-emerald-700 font-bold text-primary-foreground":
-                                      item.isActive,
-                                    "bg-muted text-foreground": !item.isActive,
+                                    "bg-muted text-foreground": true,
                                   })}
                                 >
                                   {item.prefix}_{item.suffix}

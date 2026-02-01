@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/solid-query";
 import { IronMicResponse } from "@/bindings";
 
-const REFETCH_INTERVAL = 60_000;
+const DEFAULT_REFETCH_INTERVAL = 60_000;
 const DEFAULT_API_BASE_URL = "http://localhost:8080";
 
 const getIronMicApiUrl = (start: string, end: string) => {
@@ -21,11 +21,16 @@ export const fetchIronMicStats = async (start: string, end: string): Promise<Iro
   return resp.json();
 };
 
-export function useIronMicStatsQuery(start: () => string, end: () => string) {
+export function useIronMicStatsQuery(
+  start: () => string,
+  end: () => string,
+  options?: { refetchInterval?: number | false },
+) {
+  const interval = options?.refetchInterval ?? DEFAULT_REFETCH_INTERVAL;
   return useQuery(() => ({
     queryKey: ["iron-mic", start(), end()],
     queryFn: () => fetchIronMicStats(start(), end()),
-    refetchInterval: REFETCH_INTERVAL,
+    refetchInterval: interval,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     retry: false,
