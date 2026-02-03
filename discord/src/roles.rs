@@ -37,6 +37,20 @@ pub async fn sync_and_assign(
 
     // Assign role and nickname; if this fails, surface error so the caller (event/command) can log/report.
     let mut member = guild_id.member(&ctx.http, user_id).await?;
+
+    // Determine the opposite role to remove (verified and fallback are mutually exclusive)
+    let opposite_role_id = if role_id.get() == state.cfg.verified_role_id {
+        RoleId::new(state.cfg.fallback_role_id)
+    } else {
+        RoleId::new(state.cfg.verified_role_id)
+    };
+
+    // Remove the opposite role if present
+    if member.roles.contains(&opposite_role_id) {
+        member.remove_role(&ctx.http, opposite_role_id).await?;
+    }
+
+    // Add the correct role if not already present
     let has_role = member.roles.contains(&role_id);
     if !has_role {
         member.add_role(&ctx.http, role_id).await?;

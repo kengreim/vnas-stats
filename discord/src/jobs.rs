@@ -95,9 +95,9 @@ async fn sync_all_members(state: &AppState, ctx: &serenity::Context) -> anyhow::
     }
 
     if state.cfg.audit_channel_id != 0 {
-        let duration_ms = started.elapsed().as_millis();
+        let duration = humantime::format_duration(started.elapsed());
         let msg = CreateMessage::new().content(format!(
-            "Bulk role sync complete in {duration_ms} ms ({num_changes} {})",
+            "Bulk role sync complete in {duration} ({num_changes} {})",
             if num_changes == 1 {
                 "change"
             } else {
