@@ -25,6 +25,13 @@ export const TopNavbar = () => {
         </Show>
         <div class="flex items-center gap-6 max-md:justify-between">
           <LogoButton />
+          <Link
+            to="/ironmic/$year/$month"
+            params={{ year: "2026", month: "1" }}
+            class="font-bold text-primary/50 transition-colors hover:text-primary"
+          >
+            January 2026 Iron Mic
+          </Link>
         </div>
         <Show when={!isSmall()}>
           <FullNav />
@@ -50,54 +57,33 @@ const LogoButton = () => {
 
 const FullNav = () => {
   return (
-    <>
-      <NavigationMenu>
-        {/*<NavigationMenuItem>*/}
-        {/*  <NavigationMenuTrigger>*/}
-        {/*    <Link to="/privacy">Privacy</Link>*/}
-        {/*  </NavigationMenuTrigger>*/}
-        {/*</NavigationMenuItem>*/}
-        {/*<NavigationMenuTrigger as="a" href="https://github.com/kobaltedev/kobalte" target="_blank">*/}
-        {/*  GitHub*/}
-        {/*</NavigationMenuTrigger>*/}
-        {/*<NavigationMenuTrigger as="a" href="https://github.com/kobaltedev/kobalte" target="_blank">*/}
-        {/*  GitHub*/}
-        {/*</NavigationMenuTrigger>*/}
-        {/*<NavigationMenuTrigger as="a" href="https://github.com/kobaltedev/kobalte" target="_blank">*/}
-        {/*  GitHub*/}
-        {/*</NavigationMenuTrigger>*/}
-        {/*<NavigationMenuTrigger as="a" href="https://github.com/kobaltedev/kobalte" target="_blank">*/}
-        {/*  GitHub*/}
-        {/*</NavigationMenuTrigger>*/}
-      </NavigationMenu>
-      <div class="flex items-center gap-3">
-        <a
-          href="https://discord.gg/NaFQePmdXg"
-          target="_blank"
-          rel="noreferrer"
-          aria-label="Join the community on Discord"
-          class="text-foreground transition hover:text-primary"
-        >
-          <DiscordIcon class="h-6 w-6 fill-primary/50 transition-colors hover:fill-primary" />
-        </a>
-        <a
-          href="https://github.com/kengreim/vnas-stats"
-          target="_blank"
-          rel="noreferrer"
-          aria-label="View the project on GitHub"
-          class="text-foreground transition hover:text-primary"
-        >
-          <GithubIcon class="h-6 w-6 fill-primary/50 transition-colors hover:fill-primary" />
-        </a>
-        <a href="https://vnas.vatsim.net" target="_blank" rel="noreferrer">
-          <img
-            src="/images/vnas_logo_512x512.png"
-            class="h-6 w-6 opacity-50 transition-opacity hover:opacity-100"
-            alt="vNAS logo"
-          />
-        </a>
-      </div>
-    </>
+    <div class="flex items-center gap-3">
+      <a
+        href="https://discord.gg/NaFQePmdXg"
+        target="_blank"
+        rel="noreferrer"
+        aria-label="Join the community on Discord"
+        class="text-foreground transition hover:text-primary"
+      >
+        <DiscordIcon class="h-6 w-6 fill-primary/50 transition-colors hover:fill-primary" />
+      </a>
+      <a
+        href="https://github.com/kengreim/vnas-stats"
+        target="_blank"
+        rel="noreferrer"
+        aria-label="View the project on GitHub"
+        class="text-foreground transition hover:text-primary"
+      >
+        <GithubIcon class="h-6 w-6 fill-primary/50 transition-colors hover:fill-primary" />
+      </a>
+      <a href="https://vnas.vatsim.net" target="_blank" rel="noreferrer">
+        <img
+          src="/images/vnas_logo_512x512.png"
+          class="h-6 w-6 opacity-50 transition-opacity hover:opacity-100"
+          alt="vNAS logo"
+        />
+      </a>
+    </div>
   );
 };
 
