@@ -1,6 +1,14 @@
 use chrono::{DateTime, Utc};
 use sqlx::{Pool, Postgres};
 
+/// Callsigns to exclude from Iron Mic stats.
+/// Format: (prefix, suffix) - e.g., ("SJU", "APP") for SJU_APP
+const IRON_MIC_EXCLUDED_CALLSIGNS: &[(&str, &str)] = &[
+    ("SJU", "APP"),
+    // Add more exclusions here as needed:
+    // ("ABC", "CTR"),
+];
+
 #[derive(Debug, thiserror::Error)]
 pub enum QueryError {
     #[error(transparent)]
@@ -17,6 +25,20 @@ pub struct CallsignDurationStatsRecord {
     pub is_active: bool,
 }
 
+/// Builds a SQL exclusion clause for callsigns, or empty string if no exclusions.
+fn build_callsign_exclusion_clause() -> String {
+    if IRON_MIC_EXCLUDED_CALLSIGNS.is_empty() {
+        return String::new();
+    }
+
+    let conditions: Vec<String> = IRON_MIC_EXCLUDED_CALLSIGNS
+        .iter()
+        .map(|(prefix, suffix)| format!("(prefix = '{prefix}' AND suffix = '{suffix}')"))
+        .collect();
+
+    format!(" AND NOT ({})", conditions.join(" OR "))
+}
+
 pub async fn get_iron_mic_stats(
     pool: &Pool<Postgres>,
     start: DateTime<Utc>,
@@ -30,7 +52,8 @@ pub async fn get_iron_mic_stats(
         )));
     }
 
-    sqlx::query_as::<_, CallsignDurationStatsRecord>(
+    let exclusion_clause = build_callsign_exclusion_clause();
+    let query = format!(
         r"
         SELECT
             prefix,
@@ -43,19 +66,21 @@ pub async fn get_iron_mic_stats(
             BOOL_OR(end_time IS NULL) AS is_active
         FROM callsign_sessions
         WHERE start_time < $2
-          AND (end_time IS NULL OR end_time > $1)
+          AND (end_time IS NULL OR end_time > $1){exclusion_clause}
         GROUP BY prefix, suffix
         ORDER BY duration_seconds DESC
         LIMIT $4
-        ",
-    )
-    .bind(start)
-    .bind(end)
-    .bind(now)
-    .bind(limit)
-    .fetch_all(pool)
-    .await
-    .map_err(QueryError::Sql)
+        "
+    );
+
+    sqlx::query_as::<_, CallsignDurationStatsRecord>(&query)
+        .bind(start)
+        .bind(end)
+        .bind(now)
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+        .map_err(QueryError::Sql)
 }
 
 pub async fn get_latest_datafeed_updated_at(
