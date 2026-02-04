@@ -94,19 +94,38 @@ async fn lookup_user(state: &AppState, discord_id: u64) -> anyhow::Result<Lookup
         vatsim_data: None,
     };
 
-    if let Ok(res) = state.vatusa.get_user_from_discord_id(discord_id).await {
-        lookup.cid = Some(res.cid);
-        lookup.vatusa_data = Some(res);
+    match state.vatusa.get_user_from_discord_id(discord_id).await {
+        Ok(res) => {
+            lookup.cid = Some(res.cid);
+            lookup.vatusa_data = Some(res);
+            println!(
+                "found VATUSA CID {} for discord id {discord_id}",
+                lookup.cid.unwrap()
+            );
+        }
+        Err(e) => {
+            println!("no VATUSA CID for discord id {discord_id}. Err: {e:?}");
+        }
     }
 
-    if let Ok(res) = state.vatsim.get_user_from_discord_id(discord_id).await {
-        if lookup.cid.is_none() {
-            lookup.cid = Some(res.id);
+    match state.vatsim.get_user_from_discord_id(discord_id).await {
+        Ok(res) => {
+            if lookup.cid.is_none() {
+                lookup.cid = Some(res.id);
+            }
+            lookup.vatsim_data = Some(res);
+            println!(
+                "found VATSIM CID {} for discord id {discord_id}",
+                lookup.cid.unwrap()
+            );
         }
-        lookup.vatsim_data = Some(res);
+        Err(e) => {
+            println!("no VATSIM CID for discord id {discord_id}. Err: {e:?}");
+        }
     }
 
     if lookup.vatusa_data.is_none() && lookup.vatsim_data.is_none() {
+        println!("no VATSIM CID and VATSIM data found for discord id {discord_id}");
         anyhow::bail!("no VATUSA or VATSIM match");
     }
 
