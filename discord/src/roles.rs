@@ -25,24 +25,36 @@ pub async fn sync_and_assign(
     guild_id: GuildId,
     user_id: UserId,
 ) -> anyhow::Result<SyncResult> {
+    let verified_role_id = RoleId::new(state.cfg.verified_role_id);
+    let fallback_role_id = RoleId::new(state.cfg.fallback_role_id);
+
+    // Fetch member first so we can check their current roles
+    let mut member = guild_id.member(&ctx.http, user_id).await?;
+    let has_verified = member.roles.contains(&verified_role_id);
+
     let lookup = lookup_user(state, user_id.get()).await;
 
+    // Determine role based on lookup result.
+    // If lookup fails and user already has verified, keep it to avoid demoting
+    // users due to transient API errors (rate limits, network issues, etc.)
     let role_id = match lookup {
         Ok(ref found) => {
             persist_member(&state.db, user_id.get(), found).await?;
-            RoleId::new(state.cfg.verified_role_id)
+            verified_role_id
         }
-        Err(_) => RoleId::new(state.cfg.fallback_role_id),
+        Err(_) if has_verified => {
+            // User already verified but API lookup failed - keep their verified status
+            // to avoid false demotions from rate limits or API outages
+            verified_role_id
+        }
+        Err(_) => fallback_role_id,
     };
 
-    // Assign role and nickname; if this fails, surface error so the caller (event/command) can log/report.
-    let mut member = guild_id.member(&ctx.http, user_id).await?;
-
     // Determine the opposite role to remove (verified and fallback are mutually exclusive)
-    let opposite_role_id = if role_id.get() == state.cfg.verified_role_id {
-        RoleId::new(state.cfg.fallback_role_id)
+    let opposite_role_id = if role_id == verified_role_id {
+        fallback_role_id
     } else {
-        RoleId::new(state.cfg.verified_role_id)
+        verified_role_id
     };
 
     // Remove the opposite role if present
