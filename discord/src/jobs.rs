@@ -63,7 +63,7 @@ async fn sync_all_members(state: &AppState, ctx: &serenity::Context) -> anyhow::
             }
 
             // Small jitter between requests to avoid hammering upstream APIs.
-            let jitter_ms = rng().random_range(1000..=2000);
+            let jitter_ms = rng().random_range(6000..=7000);
             tokio::time::sleep(Duration::from_millis(jitter_ms)).await;
         }
     }
